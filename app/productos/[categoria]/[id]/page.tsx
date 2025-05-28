@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { Minus, Plus, Star } from "lucide-react"
@@ -14,62 +14,95 @@ import { useCart } from "@/context/cart-context"
 import { useToast } from "@/hooks/use-toast"
 
 // Importar funciones de productos
-import { getProductById, hasStock } from "@/lib/products"
+import { getProductById, hasStock } from "@/lib/actions"
+import { defaultColors, defaultSizes } from "@/lib/products"
 
 export default function ProductPage({ params }: { params: { categoria: string; id: string } }) {
   const { toast } = useToast()
   const { addItem } = useCart()
   const [quantity, setQuantity] = useState(1)
-  const [selectedColor, setSelectedColor] = useState("Negro")
+  const [selectedColor, setSelectedColor] = useState("Blanco")
   const [selectedSize, setSelectedSize] = useState("M")
+  const [product, setProduct] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [productHasStock, setProductHasStock] = useState(true)
 
-  // Colores y tallas predeterminados
-  const defaultColors = ["Negro", "Gris", "Beige"]
-  const defaultSizes = ["S", "M", "L", "XL"]
+  // Cargar producto
+  useEffect(() => {
+    const fetchProduct = async () => {
+      setLoading(true)
+      try {
+        const productId = Number.parseInt(params.id)
+        const productData = await getProductById(productId)
 
-  // Modificar la función para obtener el producto
-  const getProductData = () => {
-    // Intentar obtener el producto desde la "base de datos"
-    const productFromDB = getProductById(Number.parseInt(params.id), params.categoria as "sweaters" | "tapados")
+        if (productData) {
+          setProduct({
+            ...productData,
+            rating: 5,
+            reviews: 12,
+            colors: defaultColors,
+            sizes: defaultSizes,
+          })
 
-    if (productFromDB) {
-      return {
-        ...productFromDB,
-        rating: 5,
-        reviews: 12,
-        colors: defaultColors, // Asegurar que siempre tenga colores
-        sizes: defaultSizes, // Asegurar que siempre tenga tallas
+          // Verificar stock
+          const hasStockResult = await hasStock(productId)
+          setProductHasStock(hasStockResult)
+        } else {
+          // Si no existe en la base de datos, usar datos predeterminados
+          setProduct({
+            id: Number.parseInt(params.id),
+            category: params.categoria,
+            name:
+              params.categoria === "sweaters"
+                ? params.id === "1"
+                  ? "Sweater Milán"
+                  : "Sweater París"
+                : "Tapado Londres",
+            description:
+              params.categoria === "sweaters"
+                ? "Sweater con felpudo en cuello, confeccionado con lana de primera calidad. Diseño exclusivo inspirado en el estilo europeo."
+                : "Tapado con felpudo en muñecas, confeccionado con materiales premium. Diseño exclusivo inspirado en el estilo europeo.",
+            price: params.categoria === "sweaters" ? (params.id === "1" ? 45000 : 42000) : 65000,
+            discount: params.categoria === "tapados" ? 15 : 0,
+            colors: defaultColors,
+            sizes: defaultSizes,
+            is_bestseller: params.id === "1" && params.categoria === "sweaters",
+            rating: 5,
+            reviews: 12,
+            stock: 10, // Stock predeterminado
+          })
+          setProductHasStock(true)
+        }
+      } catch (error) {
+        console.error("Error al cargar producto:", error)
+        toast({
+          title: "Error",
+          description: "No se pudo cargar el producto",
+          variant: "destructive",
+        })
+      } finally {
+        setLoading(false)
       }
     }
 
-    // Si no existe en la base de datos, usar datos predeterminados
-    return {
-      id: Number.parseInt(params.id),
-      category: params.categoria,
-      name:
-        params.categoria === "sweaters" ? (params.id === "1" ? "Sweater Milán" : "Sweater París") : "Tapado Londres",
-      description:
-        params.categoria === "sweaters"
-          ? "Sweater con felpudo en cuello, confeccionado con lana de primera calidad. Diseño exclusivo inspirado en el estilo europeo."
-          : "Tapado con felpudo en muñecas, confeccionado con materiales premium. Diseño exclusivo inspirado en el estilo europeo.",
-      price: params.categoria === "sweaters" ? (params.id === "1" ? 45000 : 42000) : 65000,
-      discount: params.categoria === "tapados" ? 15 : 0,
-      colors: defaultColors,
-      sizes: defaultSizes,
-      isBestseller: params.id === "1" && params.categoria === "sweaters",
-      rating: 5,
-      reviews: 12,
-      stock: 10, // Stock predeterminado
-    }
+    fetchProduct()
+  }, [params.id, params.categoria, toast])
+
+  if (loading || !product) {
+    return (
+      <div className="flex flex-col min-h-screen">
+        <SiteHeader />
+        <main className="flex-1 flex items-center justify-center">
+          <div className="animate-spin h-8 w-8 border-4 border-gray-200 rounded-full border-t-black"></div>
+        </main>
+        <SiteFooter />
+      </div>
+    )
   }
 
-  // Obtener el producto
-  const product = getProductData()
-
-  // Verificar si hay stock
-  const productHasStock = hasStock(product.id, params.categoria as "sweaters" | "tapados")
-
   const getProductImage = () => {
+    if (product.image) return product.image
+
     if (params.categoria === "sweaters") {
       if (params.id === "1") return "/products/sweater-blanco.png"
       if (params.id === "2") return "/products/sweater-beige.png"
@@ -135,7 +168,7 @@ export default function ProductPage({ params }: { params: { categoria: string; i
           <div className="grid md:grid-cols-2 gap-8">
             <div className="space-y-4">
               <div className="relative">
-                {product.isBestseller && (
+                {product.is_bestseller && (
                   <div className="absolute top-4 right-4 z-10">
                     <Badge className="bg-black text-white">Bestseller</Badge>
                   </div>
@@ -217,7 +250,7 @@ export default function ProductPage({ params }: { params: { categoria: string; i
                 <div>
                   <h3 className="font-medium mb-2">Color</h3>
                   <div className="flex gap-2">
-                    {product.colors.map((color) => (
+                    {product.colors.map((color: string) => (
                       <button
                         key={color}
                         onClick={() => setSelectedColor(color)}
@@ -233,7 +266,7 @@ export default function ProductPage({ params }: { params: { categoria: string; i
                 <div>
                   <h3 className="font-medium mb-2">Talle</h3>
                   <div className="flex gap-2">
-                    {product.sizes.map((size) => (
+                    {product.sizes.map((size: string) => (
                       <button
                         key={size}
                         onClick={() => setSelectedSize(size)}

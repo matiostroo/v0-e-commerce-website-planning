@@ -1,145 +1,140 @@
-// Tipos para los productos
-export type ProductCategory = "sweaters" | "tapados"
+import { getSupabaseClient } from "./supabase"
+import type { Product } from "./supabase"
 
-export type Product = {
-  id: number
-  name: string
-  description: string
-  price: number
-  discount: number
-  image: string
-  category: ProductCategory
-  color: string
-  isBestseller?: boolean
-  stock: number
-}
+// Colores y tallas predeterminados
+export const defaultColors = ["Blanco", "Beige", "Gris", "Marrón", "Negro"]
+export const defaultSizes = ["XS", "S", "M", "L", "XL"]
 
-// Función para obtener productos del localStorage
-export const getProducts = (): Product[] => {
-  if (typeof window === "undefined") return []
+// Función para obtener todos los productos
+export const getProducts = async (): Promise<Product[]> => {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase.from("products").select("*").order("id", { ascending: true })
 
-  try {
-    const productsJson = localStorage.getItem("products")
-    if (!productsJson) {
-      // Si no hay productos en localStorage, usar datos predeterminados
-      const defaultProducts: Product[] = [
-        {
-          id: 1,
-          name: "Sweater Milán",
-          description: "Sweater con felpudo en cuello",
-          price: 45000,
-          discount: 0,
-          image: "/products/sweater-blanco.png",
-          category: "sweaters",
-          color: "Blanco",
-          isBestseller: true,
-          stock: 10,
-        },
-        {
-          id: 2,
-          name: "Sweater París",
-          description: "Sweater con felpudo en cuello",
-          price: 42000,
-          discount: 0,
-          image: "/products/sweater-beige.png",
-          category: "sweaters",
-          color: "Beige",
-          stock: 8,
-        },
-        {
-          id: 3,
-          name: "Sweater Berlín",
-          description: "Sweater con felpudo en cuello",
-          price: 48000,
-          discount: 10,
-          image: "/products/sweater-gris.png",
-          category: "sweaters",
-          color: "Gris",
-          stock: 5,
-        },
-        {
-          id: 1,
-          name: "Tapado Londres",
-          description: "Tapado con felpudo en muñecas",
-          price: 65000,
-          discount: 15,
-          image: "/products/tapado-beige.png",
-          category: "tapados",
-          color: "Beige",
-          stock: 7,
-        },
-        {
-          id: 2,
-          name: "Tapado Viena",
-          description: "Tapado con felpudo en muñecas",
-          price: 68000,
-          discount: 0,
-          image: "/products/tapado-blanco.png",
-          category: "tapados",
-          color: "Blanco",
-          stock: 6,
-        },
-        {
-          id: 3,
-          name: "Tapado Praga",
-          description: "Tapado con felpudo en cuello",
-          price: 72000,
-          discount: 0,
-          image: "/products/tapado-marron.png",
-          category: "tapados",
-          color: "Marrón",
-          stock: 4,
-        },
-      ]
-
-      // Guardar productos predeterminados en localStorage
-      localStorage.setItem("products", JSON.stringify(defaultProducts))
-      return defaultProducts
-    }
-
-    return JSON.parse(productsJson)
-  } catch (error) {
-    console.error("Error parsing products:", error)
+  if (error) {
+    console.error("Error fetching products:", error)
     return []
   }
+
+  return data || []
 }
 
-// Función para guardar productos en localStorage
-export const saveProducts = (products: Product[]): void => {
-  if (typeof window === "undefined") return
+// Función para obtener un producto por ID
+export const getProductById = async (id: number): Promise<Product | null> => {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase.from("products").select("*").eq("id", id).single()
 
-  try {
-    localStorage.setItem("products", JSON.stringify(products))
-  } catch (error) {
-    console.error("Error saving products:", error)
+  if (error) {
+    console.error("Error fetching product:", error)
+    return null
   }
+
+  return data
 }
 
-// Función para obtener un producto por ID y categoría
-export const getProductById = (id: number, category: ProductCategory): Product | null => {
-  const products = getProducts()
-  return products.find((p) => p.id === id && p.category === category) || null
+// Función para obtener productos por categoría
+export const getProductsByCategory = async (category: string): Promise<Product[]> => {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("category", category)
+    .order("id", { ascending: true })
+
+  if (error) {
+    console.error("Error fetching products by category:", error)
+    return []
+  }
+
+  return data || []
+}
+
+// Función para obtener productos destacados
+export const getBestsellerProducts = async (): Promise<Product[]> => {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase.from("products").select("*").eq("is_bestseller", true)
+
+  if (error) {
+    console.error("Error fetching bestseller products:", error)
+    return []
+  }
+
+  return data || []
 }
 
 // Función para actualizar el stock de un producto
-export const updateProductStock = (productId: number, category: ProductCategory, newStock: number): void => {
-  const products = getProducts()
-  const productIndex = products.findIndex((p) => p.id === productId && p.category === category)
+export const updateProductStock = async (productId: number, newStock: number): Promise<boolean> => {
+  const supabase = getSupabaseClient()
+  const { error } = await supabase
+    .from("products")
+    .update({
+      stock: newStock,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", productId)
 
-  if (productIndex !== -1) {
-    products[productIndex].stock = newStock
-    saveProducts(products)
+  if (error) {
+    console.error("Error updating product stock:", error)
+    return false
   }
+
+  return true
 }
 
 // Función para verificar si un producto tiene stock
-export const hasStock = (productId: number, category: ProductCategory): boolean => {
-  const product = getProductById(productId, category)
+export const hasStock = async (productId: number): Promise<boolean> => {
+  const product = await getProductById(productId)
   return product ? product.stock > 0 : false
 }
 
 // Función para obtener el stock de un producto
-export const getProductStock = (productId: number, category: ProductCategory): number => {
-  const product = getProductById(productId, category)
+export const getProductStock = async (productId: number): Promise<number> => {
+  const product = await getProductById(productId)
   return product ? product.stock : 0
+}
+
+// Función para crear un nuevo producto
+export const createProduct = async (
+  product: Omit<Product, "id" | "created_at" | "updated_at">,
+): Promise<Product | null> => {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase.from("products").insert([product]).select()
+
+  if (error) {
+    console.error("Error creating product:", error)
+    return null
+  }
+
+  return data?.[0] || null
+}
+
+// Función para actualizar un producto
+export const updateProduct = async (id: number, product: Partial<Product>): Promise<boolean> => {
+  const supabase = getSupabaseClient()
+  const { error } = await supabase
+    .from("products")
+    .update({
+      ...product,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+
+  if (error) {
+    console.error("Error updating product:", error)
+    return false
+  }
+
+  return true
+}
+
+// Función para eliminar un producto
+export const deleteProduct = async (id: number): Promise<boolean> => {
+  const supabase = getSupabaseClient()
+  const { error } = await supabase.from("products").delete().eq("id", id)
+
+  if (error) {
+    console.error("Error deleting product:", error)
+    return false
+  }
+
+  return true
 }

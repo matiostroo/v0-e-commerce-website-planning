@@ -4,9 +4,9 @@ import type React from "react"
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import Link from "next/link"
 import Image from "next/image"
-import { ArrowLeft, CreditCard, MapPin, Truck, MessageSquare } from "lucide-react"
+import Link from "next/link"
+import { ArrowLeft, CreditCard, Truck, User } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,246 +15,228 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Separator } from "@/components/ui/separator"
 import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
-import { useCart } from "@/context/cart-context"
 import { useToast } from "@/hooks/use-toast"
+import { useCart } from "@/context/cart-context"
+import { generateOrderId } from "@/lib/orders"
 import { saveOrder } from "@/lib/orders"
-
-// Función para generar un ID único de 5 caracteres alfanuméricos
-const generateOrderId = () => {
-  const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-  let result = ""
-  for (let i = 0; i < 5; i++) {
-    result += characters.charAt(Math.floor(Math.random() * characters.length))
-  }
-  return result
-}
-
-// Modificar la función sendConfirmationEmail para manejar mejor los errores
-const sendConfirmationEmail = async (
-  email: string,
-  orderNumber: string,
-  items: any[],
-  total: number,
-  paymentMethod: string,
-) => {
-  try {
-    console.log("Enviando correo a:", email, "con número de orden:", orderNumber)
-
-    const response = await fetch("/api/send-email", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        email,
-        orderNumber,
-        items,
-        total,
-        paymentMethod,
-      }),
-    })
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      console.error("Error en la respuesta de la API:", data)
-      throw new Error(data.error || "Error al enviar el correo")
-    }
-
-    return data
-  } catch (error) {
-    console.error("Error detallado al enviar el correo:", error)
-    throw error
-  }
-}
+import { checkProductStock } from "@/lib/actions"
 
 export default function CheckoutPage() {
   const router = useRouter()
   const { toast } = useToast()
-  const { items, clearCart } = useCart()
-  const [paymentMethod, setPaymentMethod] = useState("transferencia")
-  const [shippingMethod, setShippingMethod] = useState("pickup")
+  const { items, subtotal, clearCart } = useCart()
   const [loading, setLoading] = useState(false)
-  const [processingOrder, setProcessingOrder] = useState(false)
+  const [stockError, setStockError] = useState(false)
 
-  const [shippingInfo, setShippingInfo] = useState({
+  // Estados para el formulario
+  const [formData, setFormData] = useState({
     name: "",
     email: "",
     phone: "",
     address: "",
     city: "",
-    postalCode: "",
     province: "",
+    postalCode: "",
+    paymentMethod: "transferencia",
+    shippingMethod: "envio",
   })
 
-  // Calcular totales
-  const subtotal = items.reduce((acc, item) => acc + item.price * item.quantity, 0)
-  const shipping = shippingMethod === "delivery" ? 1500 : 0
-  const total = subtotal + shipping
+  // Calcular costos
+  const shippingCost = formData.shippingMethod === "envio" ? 2000 : 0
+  const total = subtotal + shippingCost
 
-  // Verificar si hay items en el carrito
+  // Verificar stock al cargar la página
   useEffect(() => {
-    if (items.length === 0 && !processingOrder) {
-      router.push("/carrito")
-    }
-  }, [items, router, processingOrder])
+    const verifyStock = async () => {
+      setLoading(true)
+      try {
+        let hasError = false
 
-  const handleShippingInfoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        for (const item of items) {
+          const hasStock = await checkProductStock(item.id, item.quantity)
+          if (!hasStock) {
+            hasError = true
+            break
+          }
+        }
+
+        setStockError(hasError)
+
+        if (hasError) {
+          toast({
+            title: "Productos sin stock",
+            description: "Algunos productos en tu carrito ya no tienen stock disponible. Por favor, revisa tu carrito.",
+            variant: "destructive",
+          })
+        }
+      } catch (error) {
+        console.error("Error verificando stock:", error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    if (items.length > 0) {
+      verifyStock()
+    }
+  }, [items, toast])
+
+  // Manejar cambios en el formulario
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
-    setShippingInfo((prev) => ({ ...prev, [name]: value }))
+    setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
-  // Función para generar el mensaje de WhatsApp
-  const generateWhatsAppMessage = (orderNumber: string) => {
-    // Encabezado del mensaje con número de pedido
-    let message = `¡Hola! Quiero realizar el siguiente pedido (Nº ${orderNumber}):\n\n`
-
-    // Detalles de los productos
-    items.forEach((item, index) => {
-      message += `${index + 1}. ${item.name}\n`
-      message += `   - Cantidad: ${item.quantity}\n`
-      message += `   - Color: ${item.color}\n`
-      message += `   - Talle: ${item.size}\n`
-      message += `   - Precio: ${item.price.toLocaleString()}\n\n`
-    })
-
-    // Información de envío
-    message += `Método de envío: ${shippingMethod === "pickup" ? "Retiro en tienda" : "Envío a domicilio"}\n`
-    if (shippingMethod === "delivery") {
-      message += `Dirección: ${shippingInfo.address}, ${shippingInfo.city}, ${shippingInfo.postalCode}, ${shippingInfo.province}\n`
-    }
-
-    // Información de pago
-    message += `Método de pago: ${paymentMethod === "transferencia" ? "Transferencia bancaria" : "Efectivo"}\n\n`
-
-    // Totales
-    message += `Subtotal: ${subtotal.toLocaleString()}\n`
-    message += `Envío: ${shipping > 0 ? `${shipping.toLocaleString()}` : "Gratis"}\n`
-    message += `Total: ${total.toLocaleString()}\n\n`
-
-    // Información de contacto
-    message += `Mis datos de contacto:\n`
-    message += `Nombre: ${shippingInfo.name}\n`
-    message += `Email: ${shippingInfo.email}\n`
-    message += `Teléfono: ${shippingInfo.phone}\n`
-
-    return encodeURIComponent(message)
+  // Manejar cambio de método de pago
+  const handlePaymentMethodChange = (value: string) => {
+    setFormData((prev) => ({ ...prev, paymentMethod: value }))
   }
 
-  // Modificar la función saveOrder para que sea asíncrona
+  // Manejar cambio de método de envío
+  const handleShippingMethodChange = (value: string) => {
+    setFormData((prev) => ({ ...prev, shippingMethod: value }))
+  }
+
+  // Manejar envío del formulario
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
-    // Validar que todos los campos requeridos estén completos
-    if (!shippingInfo.name || !shippingInfo.email || !shippingInfo.phone) {
-      toast({
-        title: "Información incompleta",
-        description: "Por favor completa todos los campos de contacto",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (
-      shippingMethod === "delivery" &&
-      (!shippingInfo.address || !shippingInfo.city || !shippingInfo.postalCode || !shippingInfo.province)
-    ) {
-      toast({
-        title: "Información de envío incompleta",
-        description: "Por favor completa todos los campos de la dirección de envío",
-        variant: "destructive",
-      })
-      return
-    }
-
     setLoading(true)
-    setProcessingOrder(true)
 
     try {
-      // Generar número de pedido alfanumérico de 5 caracteres
-      const orderNumber = generateOrderId()
+      // Verificar stock nuevamente antes de procesar
+      let hasStockError = false
 
-      // Crear objeto de pedido
-      const orderInfo = {
-        id: orderNumber,
-        items,
-        shipping: shippingInfo,
-        total,
-        subtotal,
-        shippingCost: shipping,
-        paymentMethod,
-        shippingMethod,
-        status: "pendiente",
-        date: new Date().toISOString(),
-        whatsappSent: false,
+      for (const item of items) {
+        const hasStock = await checkProductStock(item.id, item.quantity)
+        if (!hasStock) {
+          hasStockError = true
+          break
+        }
       }
 
-      // Guardar la información del pedido en localStorage para la página de confirmación
-      localStorage.setItem("lastOrder", JSON.stringify(orderInfo))
-
-      // Guardar el pedido en la "base de datos"
-      await saveOrder(orderInfo)
-
-      // Enviar correo de confirmación
-      try {
-        await sendConfirmationEmail(shippingInfo.email, orderNumber, items, total, paymentMethod)
+      if (hasStockError) {
         toast({
-          title: "Correo enviado",
-          description: "Hemos enviado un correo de confirmación con los detalles de tu pedido",
-        })
-      } catch (emailError) {
-        console.error("Error al enviar correo:", emailError)
-        // No interrumpimos el flujo si falla el envío del correo
-        toast({
-          title: "No se pudo enviar el correo de confirmación",
-          description: "Continuaremos con tu pedido, pero no pudimos enviar el correo de confirmación",
+          title: "Productos sin stock",
+          description: "Algunos productos en tu carrito ya no tienen stock disponible. Por favor, revisa tu carrito.",
           variant: "destructive",
         })
+        setLoading(false)
+        return
       }
+
+      // Generar ID de pedido
+      const orderId = generateOrderId()
+
+      // Crear objeto de pedido
+      const order = {
+        id: orderId,
+        user_id: null, // Si el usuario no está autenticado
+        status: "pending" as const,
+        payment_method: formData.paymentMethod as "transferencia" | "efectivo",
+        shipping_method: formData.shippingMethod as "envio" | "retiro",
+        subtotal,
+        shipping_cost: shippingCost,
+        total,
+        notes: null,
+        viewed: false,
+        whatsapp_sent: false,
+      }
+
+      // Crear objeto de información de envío
+      const shippingInfo = {
+        order_id: orderId,
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        address: formData.shippingMethod === "envio" ? formData.address : null,
+        city: formData.shippingMethod === "envio" ? formData.city : null,
+        province: formData.shippingMethod === "envio" ? formData.province : null,
+        postal_code: formData.shippingMethod === "envio" ? formData.postalCode : null,
+      }
+
+      // Crear array de items del pedido
+      const orderItems = items.map((item) => ({
+        order_id: orderId,
+        product_id: item.id,
+        name: item.name,
+        price: item.price,
+        original_price: item.originalPrice || null,
+        quantity: item.quantity,
+        color: item.color,
+        size: item.size,
+        category: item.category,
+        image: item.image,
+      }))
+
+      // Guardar pedido en la base de datos
+      const savedOrderId = await saveOrder(order, shippingInfo, orderItems)
+
+      if (!savedOrderId) {
+        throw new Error("No se pudo guardar el pedido")
+      }
+
+      // Enviar correo de confirmación
+      await fetch("/api/send-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          orderNumber: orderId,
+          items,
+          total,
+          paymentMethod: formData.paymentMethod,
+        }),
+      })
+
+      // Enviar notificación a Telegram
+      await fetch("/api/telegram-notification", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          orderNumber: orderId,
+          customerName: formData.name,
+          customerEmail: formData.email,
+          customerPhone: formData.phone,
+          total,
+          paymentMethod: formData.paymentMethod,
+          shippingMethod: formData.shippingMethod,
+        }),
+      })
 
       // Limpiar carrito
       clearCart()
 
-      // Mostrar mensaje de éxito
-      toast({
-        title: "Pedido realizado",
-        description:
-          "Tu pedido ha sido registrado correctamente. Ahora serás redirigido para contactarnos por WhatsApp.",
-      })
-
-      // Generar el mensaje para WhatsApp con el número de pedido
-      const message = generateWhatsAppMessage(orderNumber)
-
-      // Número de WhatsApp (sin espacios ni caracteres especiales)
-      const whatsappNumber = localStorage.getItem("whatsappNumber") || "+5491150535668"
-
-      // Crear la URL de WhatsApp
-      const whatsappUrl = `https://wa.me/${whatsappNumber.replace(/\D/g, "")}?text=${message}`
-
-      // Abrir WhatsApp
-      window.open(whatsappUrl, "_blank")
-
       // Redirigir a página de confirmación
-      router.push("/checkout/confirmacion")
+      router.push(`/checkout/confirmacion?orderId=${orderId}`)
     } catch (error) {
+      console.error("Error al procesar el pedido:", error)
       toast({
-        title: "Error al procesar el pedido",
-        description: "Hubo un problema al procesar tu pedido. Por favor, intenta nuevamente.",
+        title: "Error",
+        description: "Ocurrió un error al procesar tu pedido. Por favor, intenta nuevamente.",
         variant: "destructive",
       })
-      setProcessingOrder(false)
     } finally {
       setLoading(false)
     }
   }
 
-  // Si no hay items y no estamos procesando un pedido, mostrar mensaje de carga
-  if (items.length === 0 && !processingOrder) {
+  // Si no hay items en el carrito, redirigir a la página del carrito
+  if (items.length === 0 && !loading) {
     return (
-      <div className="flex flex-col min-h-screen">
+      <div className="flex min-h-screen flex-col">
         <SiteHeader />
-        <main className="flex-1 flex items-center justify-center">
-          <p>Cargando...</p>
+        <main className="flex-1 container py-10">
+          <div className="max-w-md mx-auto text-center">
+            <h1 className="text-2xl font-bold mb-4">Tu carrito está vacío</h1>
+            <p className="text-muted-foreground mb-6">Agrega productos a tu carrito antes de proceder al checkout.</p>
+            <Button asChild>
+              <Link href="/productos">Ver productos</Link>
+            </Button>
+          </div>
         </main>
         <SiteFooter />
       </div>
@@ -262,40 +244,45 @@ export default function CheckoutPage() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <SiteHeader />
-      <main className="flex-1">
-        <div className="container px-4 py-6 md:py-12">
-          <div className="flex items-center gap-2 mb-6">
-            <Link href="/carrito" className="text-sm text-muted-foreground hover:text-black">
-              Carrito
+      <main className="flex-1 container py-10">
+        <div className="flex items-center mb-6">
+          <Button variant="ghost" size="sm" asChild className="mr-2">
+            <Link href="/carrito">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Volver al carrito
             </Link>
-            <span className="text-sm text-muted-foreground">/</span>
-            <span className="text-sm">Checkout</span>
+          </Button>
+          <h1 className="text-2xl font-bold">Checkout</h1>
+        </div>
+
+        {stockError ? (
+          <div className="max-w-3xl mx-auto bg-red-50 border border-red-200 rounded-lg p-6 mb-6">
+            <h2 className="text-lg font-semibold text-red-700 mb-2">Productos sin stock</h2>
+            <p className="text-red-600 mb-4">
+              Algunos productos en tu carrito ya no tienen stock disponible. Por favor, revisa tu carrito y elimina los
+              productos sin stock.
+            </p>
+            <Button asChild>
+              <Link href="/carrito">Revisar carrito</Link>
+            </Button>
           </div>
-
-          <h1 className="text-3xl font-bold mb-8">Finalizar compra</h1>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className="md:col-span-2">
-              <form onSubmit={handleSubmit} className="space-y-8">
-                {/* Información de envío */}
-                <div className="bg-white p-6 border rounded-lg">
-                  <div className="flex items-center gap-2 mb-4">
-                    <MapPin className="h-5 w-5 text-gray-500" />
-                    <h2 className="text-xl font-semibold">Información de contacto</h2>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Formulario de checkout */}
+            <div className="lg:col-span-2">
+              <form onSubmit={handleSubmit} className="space-y-6">
+                {/* Información personal */}
+                <div className="bg-white border rounded-lg p-6">
+                  <div className="flex items-center mb-4">
+                    <User className="h-5 w-5 mr-2 text-gray-500" />
+                    <h2 className="text-lg font-semibold">Información personal</h2>
                   </div>
-
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="name">Nombre completo</Label>
-                      <Input
-                        id="name"
-                        name="name"
-                        value={shippingInfo.name}
-                        onChange={handleShippingInfoChange}
-                        required
-                      />
+                      <Input id="name" name="name" value={formData.name} onChange={handleInputChange} required />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="email">Email</Label>
@@ -303,19 +290,19 @@ export default function CheckoutPage() {
                         id="email"
                         name="email"
                         type="email"
-                        value={shippingInfo.email}
-                        onChange={handleShippingInfoChange}
+                        value={formData.email}
+                        onChange={handleInputChange}
                         required
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="phone">Teléfono</Label>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="phone">Teléfono (WhatsApp)</Label>
                       <Input
                         id="phone"
                         name="phone"
                         type="tel"
-                        value={shippingInfo.phone}
-                        onChange={handleShippingInfoChange}
+                        value={formData.phone}
+                        onChange={handleInputChange}
                         required
                       />
                     </div>
@@ -323,194 +310,172 @@ export default function CheckoutPage() {
                 </div>
 
                 {/* Método de envío */}
-                <div className="bg-white p-6 border rounded-lg">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Truck className="h-5 w-5 text-gray-500" />
-                    <h2 className="text-xl font-semibold">Método de envío</h2>
+                <div className="bg-white border rounded-lg p-6">
+                  <div className="flex items-center mb-4">
+                    <Truck className="h-5 w-5 mr-2 text-gray-500" />
+                    <h2 className="text-lg font-semibold">Método de envío</h2>
                   </div>
-
-                  <RadioGroup value={shippingMethod} onValueChange={setShippingMethod} className="space-y-3">
-                    <div className="flex items-start space-x-2 border p-4 rounded-md">
-                      <RadioGroupItem value="pickup" id="pickup" className="mt-1" />
-                      <div className="grid gap-1.5">
-                        <Label htmlFor="pickup" className="font-medium">
-                          Retirar en tienda (Gratis)
-                        </Label>
-                        <p className="text-sm text-muted-foreground">
-                          Retira tu pedido en nuestra tienda: Av. Corrientes 1234, CABA
-                        </p>
-                      </div>
+                  <RadioGroup
+                    value={formData.shippingMethod}
+                    onValueChange={handleShippingMethodChange}
+                    className="space-y-3"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="envio" id="envio" />
+                      <Label htmlFor="envio" className="flex items-center">
+                        <span className="font-medium">Envío a domicilio</span>
+                        <span className="ml-2 text-sm text-muted-foreground">($2,000)</span>
+                      </Label>
                     </div>
-                    <div className="flex items-start space-x-2 border p-4 rounded-md">
-                      <RadioGroupItem value="delivery" id="delivery" className="mt-1" />
-                      <div className="grid gap-1.5 w-full">
-                        <Label htmlFor="delivery" className="font-medium">
-                          Envío a domicilio ($1.500)
-                        </Label>
-                        <p className="text-sm text-muted-foreground mb-4">
-                          Entrega en 2-3 días hábiles en Capital Federal
-                        </p>
-
-                        {shippingMethod === "delivery" && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
-                            <div className="space-y-2">
-                              <Label htmlFor="address">Dirección</Label>
-                              <Input
-                                id="address"
-                                name="address"
-                                value={shippingInfo.address}
-                                onChange={handleShippingInfoChange}
-                                required={shippingMethod === "delivery"}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="city">Ciudad</Label>
-                              <Input
-                                id="city"
-                                name="city"
-                                value={shippingInfo.city}
-                                onChange={handleShippingInfoChange}
-                                required={shippingMethod === "delivery"}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="postalCode">Código Postal</Label>
-                              <Input
-                                id="postalCode"
-                                name="postalCode"
-                                value={shippingInfo.postalCode}
-                                onChange={handleShippingInfoChange}
-                                required={shippingMethod === "delivery"}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="province">Provincia</Label>
-                              <Input
-                                id="province"
-                                name="province"
-                                value={shippingInfo.province}
-                                onChange={handleShippingInfoChange}
-                                required={shippingMethod === "delivery"}
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="retiro" id="retiro" />
+                      <Label htmlFor="retiro" className="flex items-center">
+                        <span className="font-medium">Retiro en tienda</span>
+                        <span className="ml-2 text-sm text-muted-foreground">(Gratis)</span>
+                      </Label>
                     </div>
                   </RadioGroup>
+
+                  {formData.shippingMethod === "envio" && (
+                    <div className="mt-4 space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="address">Dirección</Label>
+                        <Input
+                          id="address"
+                          name="address"
+                          value={formData.address}
+                          onChange={handleInputChange}
+                          required={formData.shippingMethod === "envio"}
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="city">Ciudad</Label>
+                          <Input
+                            id="city"
+                            name="city"
+                            value={formData.city}
+                            onChange={handleInputChange}
+                            required={formData.shippingMethod === "envio"}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="province">Provincia</Label>
+                          <Input
+                            id="province"
+                            name="province"
+                            value={formData.province}
+                            onChange={handleInputChange}
+                            required={formData.shippingMethod === "envio"}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="postalCode">Código postal</Label>
+                          <Input
+                            id="postalCode"
+                            name="postalCode"
+                            value={formData.postalCode}
+                            onChange={handleInputChange}
+                            required={formData.shippingMethod === "envio"}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Método de pago */}
-                <div className="bg-white p-6 border rounded-lg">
-                  <div className="flex items-center gap-2 mb-4">
-                    <CreditCard className="h-5 w-5 text-gray-500" />
-                    <h2 className="text-xl font-semibold">Método de pago</h2>
+                <div className="bg-white border rounded-lg p-6">
+                  <div className="flex items-center mb-4">
+                    <CreditCard className="h-5 w-5 mr-2 text-gray-500" />
+                    <h2 className="text-lg font-semibold">Método de pago</h2>
                   </div>
-
-                  <RadioGroup value={paymentMethod} onValueChange={setPaymentMethod} className="space-y-3">
-                    <div className="flex items-start space-x-2 border p-4 rounded-md">
-                      <RadioGroupItem value="transferencia" id="transferencia" className="mt-1" />
-                      <div className="grid gap-1.5">
-                        <Label htmlFor="transferencia" className="font-medium">
-                          Transferencia bancaria
-                        </Label>
-                        <p className="text-sm text-muted-foreground">
-                          Te enviaremos los datos bancarios por WhatsApp para realizar la transferencia
-                        </p>
-                      </div>
+                  <RadioGroup
+                    value={formData.paymentMethod}
+                    onValueChange={handlePaymentMethodChange}
+                    className="space-y-3"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="transferencia" id="transferencia" />
+                      <Label htmlFor="transferencia" className="font-medium">
+                        Transferencia bancaria
+                      </Label>
                     </div>
-                    <div className="flex items-start space-x-2 border p-4 rounded-md">
-                      <RadioGroupItem value="efectivo" id="efectivo" className="mt-1" />
-                      <div className="grid gap-1.5">
-                        <Label htmlFor="efectivo" className="font-medium">
-                          Efectivo
-                        </Label>
-                        <p className="text-sm text-muted-foreground">
-                          Paga en efectivo al momento de recibir tu pedido o al retirarlo en tienda
-                        </p>
-                      </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="efectivo" id="efectivo" />
+                      <Label htmlFor="efectivo" className="font-medium">
+                        Efectivo (al retirar o contra entrega)
+                      </Label>
                     </div>
                   </RadioGroup>
+
+                  {formData.paymentMethod === "transferencia" && (
+                    <div className="mt-4 p-4 bg-gray-50 rounded-md">
+                      <p className="text-sm text-muted-foreground">
+                        Después de completar tu pedido, recibirás un correo electrónico con los datos bancarios para
+                        realizar la transferencia.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex justify-between">
-                  <Button variant="outline" type="button" asChild>
-                    <Link href="/carrito" className="flex items-center gap-2">
-                      <ArrowLeft className="h-4 w-4" />
-                      Volver al carrito
-                    </Link>
-                  </Button>
-                  <Button
-                    type="submit"
-                    className="bg-black hover:bg-gray-800 flex items-center gap-2"
-                    disabled={loading}
-                  >
-                    {loading ? (
-                      "Procesando pedido..."
-                    ) : (
-                      <>
-                        Finalizar y enviar WhatsApp
-                        <MessageSquare className="h-4 w-4" />
-                      </>
-                    )}
-                  </Button>
-                </div>
+                {/* Botón de finalizar compra */}
+                <Button type="submit" className="w-full" size="lg" disabled={loading || stockError}>
+                  {loading ? "Procesando..." : "Finalizar compra"}
+                </Button>
               </form>
             </div>
 
-            {/* Resumen de compra */}
+            {/* Resumen del pedido */}
             <div>
-              <div className="bg-white border rounded-lg p-6 space-y-6 sticky top-24">
-                <h2 className="text-xl font-semibold">Resumen de compra</h2>
-
-                <div className="space-y-4 max-h-80 overflow-y-auto">
-                  {items.map((item, index) => (
-                    <div key={`${item.id}-${item.color}-${item.size}-${index}`} className="flex gap-3">
-                      <div className="w-16 h-20 flex-shrink-0 relative">
+              <div className="bg-white border rounded-lg p-6 sticky top-6">
+                <h2 className="text-lg font-semibold mb-4">Resumen del pedido</h2>
+                <div className="space-y-4">
+                  {items.map((item) => (
+                    <div key={`${item.id}-${item.color}-${item.size}`} className="flex gap-4">
+                      <div className="relative w-16 h-16 flex-shrink-0">
                         <Image
                           src={item.image || "/placeholder.svg"}
                           alt={item.name}
                           fill
-                          className="rounded-md object-cover"
+                          className="object-cover rounded-md"
                         />
-                        <div className="absolute -top-2 -right-2 w-5 h-5 bg-black text-white rounded-full flex items-center justify-center text-xs">
-                          {item.quantity}
-                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-medium text-sm">{item.name}</h3>
-                        <p className="text-xs text-muted-foreground">
-                          {item.color} / {item.size}
+                      <div className="flex-1">
+                        <h3 className="font-medium">{item.name}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {item.color}, Talle {item.size}
                         </p>
-                        <p className="text-sm font-medium mt-1">${item.price.toLocaleString()}</p>
+                        <div className="flex justify-between mt-1">
+                          <span className="text-sm">x{item.quantity}</span>
+                          <span>${(item.price * item.quantity).toLocaleString()}</span>
+                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
 
-                <Separator />
+                <Separator className="my-4" />
 
                 <div className="space-y-2">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Subtotal</span>
+                    <span>Subtotal</span>
                     <span>${subtotal.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Envío</span>
-                    <span>{shipping > 0 ? `${shipping.toLocaleString()}` : "Gratis"}</span>
+                    <span>Envío</span>
+                    <span>{shippingCost > 0 ? `$${shippingCost.toLocaleString()}` : "Gratis"}</span>
                   </div>
-                </div>
-
-                <Separator />
-
-                <div className="flex justify-between font-semibold text-lg">
-                  <span>Total</span>
-                  <span>${total.toLocaleString()}</span>
+                  <Separator className="my-2" />
+                  <div className="flex justify-between font-bold">
+                    <span>Total</span>
+                    <span>${total.toLocaleString()}</span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
       </main>
       <SiteFooter />
     </div>

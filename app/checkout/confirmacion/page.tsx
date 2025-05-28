@@ -1,235 +1,309 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
-import { CheckCircle, ShoppingBag, MessageSquare } from "lucide-react"
+import { CheckCircle, ArrowLeft, Copy, Check } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
 import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
-import { useCart } from "@/context/cart-context"
-import { Separator } from "@/components/ui/separator"
-import { updateOrderWhatsappStatus } from "@/lib/orders"
+import { getOrderById } from "@/lib/orders"
+import type { Order, ShippingInfo, OrderItem } from "@/lib/supabase"
 
-type OrderInfo = {
-  id: string
-  date: string
-  items: any[]
-  total: number
-  shipping: {
-    name: string
-    email: string
-    phone: string
-    address?: string
-    city?: string
-    postalCode?: string
-    province?: string
-  }
-  paymentMethod: string
-  shippingMethod: string
-}
+export default function ConfirmacionPage() {
+  const searchParams = useSearchParams()
+  const orderId = searchParams.get("orderId")
 
-export default function ConfirmationPage() {
-  const router = useRouter()
-  const { items } = useCart()
-  const [orderInfo, setOrderInfo] = useState<OrderInfo | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [order, setOrder] = useState<Order | null>(null)
+  const [shippingInfo, setShippingInfo] = useState<ShippingInfo | null>(null)
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([])
+  const [copied, setCopied] = useState(false)
 
-  // Cargar información del pedido desde localStorage
   useEffect(() => {
-    const storedOrder = localStorage.getItem("lastOrder")
+    const fetchOrderDetails = async () => {
+      if (!orderId) return
 
-    if (storedOrder) {
       try {
-        setOrderInfo(JSON.parse(storedOrder))
+        const { order, shippingInfo, orderItems } = await getOrderById(orderId)
+        setOrder(order)
+        setShippingInfo(shippingInfo)
+        setOrderItems(orderItems)
       } catch (error) {
-        console.error("Error parsing order info:", error)
+        console.error("Error fetching order details:", error)
+      } finally {
+        setLoading(false)
       }
-    } else if (items.length === 0) {
-      // Si no hay pedido en localStorage y no hay items en el carrito, redirigir a inicio
-      router.push("/")
-    }
-  }, [items, router])
-
-  // Función para generar el mensaje de WhatsApp nuevamente
-  const generateWhatsAppMessage = () => {
-    if (!orderInfo) return ""
-
-    // Encabezado del mensaje con número de pedido
-    let message = `¡Hola! Quiero realizar el siguiente pedido (Nº ${orderInfo.id}):\n\n`
-
-    // Detalles de los productos
-    orderInfo.items.forEach((item, index) => {
-      message += `${index + 1}. ${item.name}\n`
-      message += `   - Cantidad: ${item.quantity}\n`
-      message += `   - Color: ${item.color}\n`
-      message += `   - Talle: ${item.size}\n`
-      message += `   - Precio: ${item.price.toLocaleString()}\n\n`
-    })
-
-    // Información de envío
-    const isDelivery = orderInfo.shippingMethod === "delivery"
-    message += `Método de envío: ${isDelivery ? "Envío a domicilio" : "Retiro en tienda"}\n`
-    if (isDelivery && orderInfo.shipping.address && orderInfo.shipping.city) {
-      message += `Dirección: ${orderInfo.shipping.address}, ${orderInfo.shipping.city}, ${orderInfo.shipping.postalCode}, ${orderInfo.shipping.province}\n`
     }
 
-    // Información de pago
-    message += `Método de pago: ${orderInfo.paymentMethod === "transferencia" ? "Transferencia bancaria" : "Efectivo"}\n\n`
+    fetchOrderDetails()
+  }, [orderId])
 
-    // Totales
-    message += `Total: ${orderInfo.total.toLocaleString()}\n\n`
-
-    // Información de contacto
-    message += `Mis datos de contacto:\n`
-    message += `Nombre: ${orderInfo.shipping.name}\n`
-    message += `Email: ${orderInfo.shipping.email}\n`
-    message += `Teléfono: ${orderInfo.shipping.phone}\n`
-
-    return encodeURIComponent(message)
+  const handleCopyOrderId = () => {
+    if (orderId) {
+      navigator.clipboard.writeText(orderId)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
   }
 
-  const handleContactWhatsApp = () => {
-    if (!orderInfo) return
-
-    const message = generateWhatsAppMessage()
-    const whatsappNumber = "+5491150535668"
-    const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${message}`
-
-    // Actualizar el estado del pedido para indicar que se envió por WhatsApp
-    updateOrderWhatsappStatus(orderInfo.id, true)
-
-    window.open(whatsappUrl, "_blank")
-  }
-
-  if (!orderInfo) {
+  if (!orderId) {
     return (
-      <div className="flex flex-col min-h-screen">
+      <div className="flex min-h-screen flex-col">
         <SiteHeader />
-        <main className="flex-1 flex items-center justify-center">
-          <p>Cargando información del pedido...</p>
+        <main className="flex-1 container py-10">
+          <div className="max-w-md mx-auto text-center">
+            <h1 className="text-2xl font-bold mb-4">Pedido no encontrado</h1>
+            <p className="text-muted-foreground mb-6">No se encontró información del pedido.</p>
+            <Button asChild>
+              <Link href="/">Volver al inicio</Link>
+            </Button>
+          </div>
         </main>
         <SiteFooter />
       </div>
     )
   }
 
-  // Formatear fecha
-  const orderDate = new Date(orderInfo.date)
-  const formattedDate = orderDate.toLocaleDateString("es-AR", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <SiteHeader />
-      <main className="flex-1 py-12">
-        <div className="container max-w-3xl px-4">
-          <div className="bg-white p-8 border rounded-lg shadow-sm">
-            <div className="flex justify-center mb-6">
-              <CheckCircle className="h-16 w-16 text-green-500" />
-            </div>
+      <main className="flex-1 container py-10">
+        <Button variant="ghost" size="sm" asChild className="mb-6">
+          <Link href="/">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Volver al inicio
+          </Link>
+        </Button>
 
-            <div className="text-center mb-8">
-              <h1 className="text-2xl font-bold mb-2">¡Gracias por tu pedido!</h1>
-              <p className="text-muted-foreground">
-                Tu pedido ha sido registrado correctamente. Hemos enviado un correo electrónico con los detalles de tu
-                compra.
-              </p>
-              <p className="text-muted-foreground mt-2">
-                Para finalizar el proceso, te recomendamos contactarnos por WhatsApp para coordinar el pago y la
-                entrega.
-              </p>
-            </div>
-
-            <div className="bg-gray-50 p-6 rounded-md mb-8">
-              <div className="flex flex-col md:flex-row justify-between mb-4">
-                <div>
-                  <h2 className="font-medium">Número de pedido</h2>
-                  <p className="text-lg font-mono">{orderInfo.id}</p>
-                </div>
-                <div className="mt-4 md:mt-0 md:text-right">
-                  <h2 className="font-medium">Fecha</h2>
-                  <p>{formattedDate}</p>
-                </div>
+        <div className="max-w-3xl mx-auto">
+          <div className="bg-white border rounded-lg p-8 mb-6">
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="bg-green-100 p-3 rounded-full mb-4">
+                <CheckCircle className="h-12 w-12 text-green-600" />
               </div>
+              <h1 className="text-2xl font-bold mb-2">¡Gracias por tu compra!</h1>
+              <p className="text-muted-foreground">Tu pedido ha sido recibido y está siendo procesado.</p>
+            </div>
 
-              <Separator className="my-4" />
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6">
+              <div className="bg-gray-50 px-4 py-2 rounded-md flex items-center">
+                <span className="text-muted-foreground mr-2">Pedido #:</span>
+                <span className="font-medium">{orderId}</span>
+                <button
+                  onClick={handleCopyOrderId}
+                  className="ml-2 p-1 hover:bg-gray-200 rounded-md"
+                  aria-label="Copiar número de pedido"
+                >
+                  {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
 
-              <div className="space-y-4">
-                <h2 className="font-medium">Detalles del pedido</h2>
-
-                <div className="space-y-3">
-                  {orderInfo.items.map((item, index) => (
-                    <div key={index} className="flex gap-3">
-                      <div className="w-16 h-20 flex-shrink-0 relative">
-                        <Image
-                          src={item.image || "/placeholder.svg"}
-                          alt={item.name}
-                          width={64}
-                          height={80}
-                          className="rounded-md object-cover"
-                        />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex justify-between">
-                          <h3 className="font-medium text-sm">{item.name}</h3>
-                          <p className="text-sm font-medium">${item.price.toLocaleString()}</p>
+            {loading ? (
+              <div className="flex justify-center items-center py-12">
+                <div className="animate-spin h-8 w-8 border-4 border-gray-200 rounded-full border-t-black"></div>
+              </div>
+            ) : (
+              <>
+                {order && (
+                  <div className="space-y-6">
+                    <div>
+                      <h2 className="text-lg font-semibold mb-3">Detalles del pedido</h2>
+                      <div className="bg-gray-50 rounded-md p-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-sm text-muted-foreground">Fecha</p>
+                            <p className="font-medium">
+                              {new Date(order.created_at).toLocaleDateString("es-AR", {
+                                year: "numeric",
+                                month: "long",
+                                day: "numeric",
+                              })}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">Estado</p>
+                            <p className="font-medium capitalize">
+                              {order.status === "pending"
+                                ? "Pendiente"
+                                : order.status === "processing"
+                                  ? "En proceso"
+                                  : order.status === "completed"
+                                    ? "Completado"
+                                    : "Cancelado"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">Método de pago</p>
+                            <p className="font-medium capitalize">
+                              {order.payment_method === "transferencia" ? "Transferencia bancaria" : "Efectivo"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">Método de envío</p>
+                            <p className="font-medium capitalize">
+                              {order.shipping_method === "envio" ? "Envío a domicilio" : "Retiro en tienda"}
+                            </p>
+                          </div>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {item.color} / {item.size} / Cantidad: {item.quantity}
-                        </p>
                       </div>
                     </div>
-                  ))}
-                </div>
 
-                <Separator className="my-4" />
+                    {shippingInfo && (
+                      <div>
+                        <h2 className="text-lg font-semibold mb-3">Información de contacto</h2>
+                        <div className="bg-gray-50 rounded-md p-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <p className="text-sm text-muted-foreground">Nombre</p>
+                              <p className="font-medium">{shippingInfo.name}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-muted-foreground">Email</p>
+                              <p className="font-medium">{shippingInfo.email}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-muted-foreground">Teléfono</p>
+                              <p className="font-medium">{shippingInfo.phone}</p>
+                            </div>
+                          </div>
 
-                <div className="flex justify-between font-semibold">
-                  <span>Total</span>
-                  <span>${orderInfo.total.toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
+                          {order.shipping_method === "envio" && (
+                            <div className="mt-4">
+                              <p className="text-sm text-muted-foreground mb-1">Dirección de envío</p>
+                              <p className="font-medium">
+                                {shippingInfo.address}, {shippingInfo.city}, {shippingInfo.province},{" "}
+                                {shippingInfo.postal_code}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
-            <div className="grid md:grid-cols-2 gap-6 mb-8">
-              <div>
-                <h2 className="font-medium mb-2">Información de contacto</h2>
-                <p className="text-sm">{orderInfo.shipping.name}</p>
-                <p className="text-sm">{orderInfo.shipping.email}</p>
-                <p className="text-sm">{orderInfo.shipping.phone}</p>
-              </div>
+                    <div>
+                      <h2 className="text-lg font-semibold mb-3">Productos</h2>
+                      <div className="border rounded-md overflow-hidden">
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Producto</th>
+                                <th className="px-4 py-3 text-center text-sm font-medium text-gray-500">Cantidad</th>
+                                <th className="px-4 py-3 text-right text-sm font-medium text-gray-500">Precio</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                              {orderItems.map((item) => (
+                                <tr key={item.id}>
+                                  <td className="px-4 py-3">
+                                    <div className="flex items-center">
+                                      {item.image && (
+                                        <div className="relative w-12 h-12 mr-3 flex-shrink-0">
+                                          <Image
+                                            src={item.image || "/placeholder.svg"}
+                                            alt={item.name}
+                                            fill
+                                            className="object-cover rounded-md"
+                                          />
+                                        </div>
+                                      )}
+                                      <div>
+                                        <p className="font-medium">{item.name}</p>
+                                        <p className="text-sm text-muted-foreground">
+                                          {item.color}, Talle {item.size}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-center">{item.quantity}</td>
+                                  <td className="px-4 py-3 text-right">
+                                    ${(item.price * item.quantity).toLocaleString()}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
 
-              <div>
-                <h2 className="font-medium mb-2">Método de pago</h2>
-                <p className="text-sm capitalize">
-                  {orderInfo.paymentMethod === "transferencia" ? "Transferencia bancaria" : "Efectivo"}
-                </p>
-              </div>
-            </div>
+                    <div>
+                      <div className="bg-gray-50 rounded-md p-4">
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Subtotal</span>
+                            <span>${order.subtotal.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Envío</span>
+                            <span>
+                              {order.shipping_cost > 0 ? `$${order.shipping_cost.toLocaleString()}` : "Gratis"}
+                            </span>
+                          </div>
+                          <Separator className="my-2" />
+                          <div className="flex justify-between font-bold">
+                            <span>Total</span>
+                            <span>${order.total.toLocaleString()}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
 
-            <div className="space-y-4">
-              <Button
-                onClick={handleContactWhatsApp}
-                className="w-full bg-green-600 hover:bg-green-700 text-white gap-2"
-              >
-                <MessageSquare className="h-4 w-4" />
-                Contactar por WhatsApp
-              </Button>
+                    {order.payment_method === "transferencia" && (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+                        <h3 className="font-semibold mb-2">Instrucciones de pago</h3>
+                        <p className="text-sm mb-3">
+                          Para completar tu compra, realiza una transferencia bancaria con los siguientes datos:
+                        </p>
+                        <div className="space-y-2 text-sm">
+                          <p>
+                            <span className="font-medium">Banco:</span> Banco Nación
+                          </p>
+                          <p>
+                            <span className="font-medium">Titular:</span> Galazzia S.R.L.
+                          </p>
+                          <p>
+                            <span className="font-medium">CUIT:</span> 30-71234567-8
+                          </p>
+                          <p>
+                            <span className="font-medium">CBU:</span> 0110000000000000000000
+                          </p>
+                          <p>
+                            <span className="font-medium">Alias:</span> GALAZZIA.TIENDA
+                          </p>
+                          <p>
+                            <span className="font-medium">Monto:</span> ${order.total.toLocaleString()}
+                          </p>
+                        </div>
+                        <p className="text-sm mt-3">
+                          Una vez realizada la transferencia, envía el comprobante por WhatsApp al +54 9 11 5053 5668
+                          indicando tu número de pedido.
+                        </p>
+                      </div>
+                    )}
 
-              <Button asChild className="w-full bg-black hover:bg-gray-800">
-                <Link href="/" className="flex items-center justify-center gap-2">
-                  <ShoppingBag className="h-4 w-4" />
-                  Seguir comprando
-                </Link>
-              </Button>
-            </div>
+                    <div className="bg-gray-50 border rounded-md p-4">
+                      <h3 className="font-semibold mb-2">¿Qué sigue?</h3>
+                      <p className="text-sm">
+                        Te contactaremos por WhatsApp para coordinar la entrega o el retiro de tu pedido. Si tienes
+                        alguna pregunta, no dudes en escribirnos al +54 9 11 5053 5668.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="text-center">
+            <Button asChild>
+              <Link href="/productos">Seguir comprando</Link>
+            </Button>
           </div>
         </div>
       </main>

@@ -35,7 +35,7 @@ export default function AdminLoginPage() {
         description: "Bienvenido al panel de administración",
       })
 
-      router.push("/admin/pedidos")
+      router.push("/admin/stock")
     } else {
       toast({
         title: "Acceso denegado",

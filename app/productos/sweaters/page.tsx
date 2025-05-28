@@ -1,43 +1,47 @@
+"use client"
+
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import Image from "next/image"
-import { ArrowLeft } from "lucide-react"
-
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardFooter } from "@/components/ui/card"
+import { getProductsByCategory } from "@/lib/actions"
+import type { Product } from "@/lib/supabase"
 
-export default function SweatersPage() {
-  // Datos de ejemplo - en una implementación real, estos vendrían de una base de datos
-  const products = [
-    {
-      id: 1,
-      name: "Sweater Milán",
-      description: "Sweater con felpudo en cuello",
-      price: 45000,
-      image: "/products/sweater-blanco.png",
-      isBestseller: true,
-      color: "Blanco",
-    },
-    {
-      id: 2,
-      name: "Sweater París",
-      description: "Sweater con felpudo en cuello",
-      price: 42000,
-      image: "/products/sweater-beige.png",
-      isBestseller: false,
-      color: "Beige",
-    },
-    {
-      id: 3,
-      name: "Sweater Berlín",
-      description: "Sweater con felpudo en cuello",
-      price: 48000,
-      image: "/products/sweater-gris.png",
-      isBestseller: false,
-      color: "Gris",
-    },
-  ]
+export default function SweaterPage() {
+  const [products, setProducts] = useState<Product[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchProducts = async () => {
+      setLoading(true)
+      try {
+        const data = await getProductsByCategory("sweaters")
+        setProducts(data)
+      } catch (error) {
+        console.error("Error fetching products:", error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchProducts()
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex flex-col min-h-screen">
+        <SiteHeader />
+        <main className="flex-1 flex items-center justify-center">
+          <div className="animate-spin h-8 w-8 border-4 border-gray-200 rounded-full border-t-black"></div>
+        </main>
+        <SiteFooter />
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -49,54 +53,67 @@ export default function SweatersPage() {
               Inicio
             </Link>
             <span className="text-sm text-muted-foreground">/</span>
+            <Link href="/productos" className="text-sm text-muted-foreground hover:text-black">
+              Productos
+            </Link>
+            <span className="text-sm text-muted-foreground">/</span>
             <span className="text-sm">Sweaters</span>
           </div>
-
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-            <div>
-              <h1 className="text-3xl font-bold mb-2">Sweaters</h1>
-              <p className="text-muted-foreground">
-                Descubre nuestra colección de sweaters con detalles de felpudo, inspirados en el estilo europeo.
-              </p>
-            </div>
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Volver al inicio
-              </Link>
-            </Button>
-          </div>
-
-          <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-6">
-            {products.map((product) => (
-              <div key={product.id} className="group relative overflow-hidden rounded-lg border">
-                <Link href={`/productos/sweaters/${product.id}`} className="absolute inset-0 z-10">
-                  <span className="sr-only">Ver producto</span>
-                </Link>
-                <div className="relative aspect-square overflow-hidden">
-                  <Image
-                    src={product.image || "/placeholder.svg"}
-                    alt={product.name}
-                    width={400}
-                    height={400}
-                    className="object-cover transition-transform group-hover:scale-105 h-full w-full"
-                  />
-                  {product.isBestseller && (
-                    <div className="absolute top-4 right-4">
-                      <Badge className="bg-black text-white">Bestseller</Badge>
-                    </div>
-                  )}
-                </div>
-                <div className="p-4 bg-white">
-                  <h3 className="font-semibold text-lg">{product.name}</h3>
-                  <p className="text-sm text-muted-foreground">{product.description}</p>
-                  <div className="flex items-center justify-between mt-2">
-                    <div className="font-semibold">${product.price.toLocaleString()}</div>
-                    <div className="text-sm text-muted-foreground">{product.color}</div>
+          <div className="space-y-6">
+            <h1 className="text-3xl font-bold">Sweaters</h1>
+            <p className="text-muted-foreground">
+              Descubre nuestra colección de sweaters con felpudo, confeccionados con lana de primera calidad. Diseños
+              exclusivos inspirados en el estilo europeo.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {products.map((product) => (
+                <Card key={product.id} className="overflow-hidden">
+                  <div className="relative">
+                    {product.is_bestseller && (
+                      <div className="absolute top-2 right-2 z-10">
+                        <Badge className="bg-black text-white">Bestseller</Badge>
+                      </div>
+                    )}
+                    {product.discount > 0 && (
+                      <div className="absolute top-2 right-2 z-10">
+                        <Badge className="bg-red-600 text-white">-{product.discount}%</Badge>
+                      </div>
+                    )}
+                    <Link href={`/productos/sweaters/${product.id}`}>
+                      <Image
+                        src={product.image || "/products/sweater-blanco.png"}
+                        alt={product.name}
+                        width={500}
+                        height={600}
+                        className="object-cover w-full aspect-[4/5]"
+                      />
+                    </Link>
                   </div>
-                </div>
-              </div>
-            ))}
+                  <CardContent className="p-4">
+                    <Link href={`/productos/sweaters/${product.id}`}>
+                      <h2 className="font-semibold text-lg mb-2">{product.name}</h2>
+                    </Link>
+                    {product.discount > 0 ? (
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold">
+                          ${((product.price * (100 - product.discount)) / 100).toLocaleString()}
+                        </span>
+                        <span className="text-sm text-muted-foreground line-through">
+                          ${product.price.toLocaleString()}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="font-bold">${product.price.toLocaleString()}</span>
+                    )}
+                  </CardContent>
+                  <CardFooter className="p-4 pt-0">
+                    <Button asChild className="w-full bg-black hover:bg-gray-800 text-white">
+                      <Link href={`/productos/sweaters/${product.id}`}>Ver detalles</Link>
+                    </Button>
+                  </CardFooter>
+                </Card>
+              ))}
+            </div>
           </div>
         </div>
       </main>

@@ -1,312 +1,275 @@
-export type OrderItem = {
-  id: number
-  name: string
-  price: number
-  originalPrice?: number
-  color: string
-  size: string
-  quantity: number
-  image: string
-  category: string
+import { getSupabaseClient } from "./supabase"
+import type { Order, ShippingInfo, OrderItem } from "./supabase"
+import { updateProductStock } from "./products"
+
+// Función para generar un ID de pedido único
+export const generateOrderId = (): string => {
+  const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+  let result = ""
+  for (let i = 0; i < 5; i++) {
+    result += characters.charAt(Math.floor(Math.random() * characters.length))
+  }
+  return result
 }
 
-export type OrderShipping = {
-  name: string
-  email: string
-  phone: string
-  address?: string
-  city?: string
-  postalCode?: string
-  province?: string
-}
+// Función para guardar un pedido completo (con información de envío e items)
+export const saveOrder = async (
+  order: Omit<Order, "created_at" | "updated_at">,
+  shippingInfo: Omit<ShippingInfo, "id" | "created_at">,
+  orderItems: Omit<OrderItem, "id" | "created_at">[],
+): Promise<string | null> => {
+  const supabase = getSupabaseClient()
 
-export type Order = {
-  id: string
-  items: OrderItem[]
-  shipping: OrderShipping
-  total: number
-  subtotal: number
-  shippingCost: number
-  paymentMethod: string
-  shippingMethod: string
-  status: "pendiente" | "confirmado" | "enviado" | "entregado" | "cancelado"
-  date: string
-  whatsappSent: boolean
-  notes?: string
-  viewed: boolean // Nuevo campo para saber si el administrador ya vio el pedido
-}
-
-// Función para guardar un pedido
-export const saveOrder = async (order: Order): Promise<void> => {
   try {
-    // Asegurarse de que el campo viewed esté inicializado
-    const orderWithViewed = {
-      ...order,
-      viewed: false, // Por defecto, un nuevo pedido no ha sido visto
+    // 1. Insertar el pedido
+    const { data: orderData, error: orderError } = await supabase.from("orders").insert([order]).select()
+
+    if (orderError) {
+      console.error("Error creating order:", orderError)
+      return null
     }
 
-    // Obtener pedidos existentes
-    const orders = getOrders()
+    const orderId = orderData?.[0]?.id
 
-    // Agregar el nuevo pedido
-    orders.push(orderWithViewed)
+    if (!orderId) {
+      console.error("No order ID returned")
+      return null
+    }
 
-    // Guardar en localStorage
-    localStorage.setItem("orders", JSON.stringify(orders))
+    // 2. Insertar la información de envío
+    const { error: shippingError } = await supabase.from("shipping_info").insert([
+      {
+        ...shippingInfo,
+        order_id: orderId,
+      },
+    ])
 
-    // Actualizar contador de pedidos nuevos
-    updateNewOrdersCount(1)
+    if (shippingError) {
+      console.error("Error creating shipping info:", shippingError)
+      // Intentar eliminar el pedido para revertir
+      await supabase.from("orders").delete().eq("id", orderId)
+      return null
+    }
 
-    // Actualizar stock de productos
-    try {
-      // Obtener productos
-      const productsJson = localStorage.getItem("products")
-      if (productsJson) {
-        const products = JSON.parse(productsJson)
+    // 3. Insertar los items del pedido
+    const orderItemsWithOrderId = orderItems.map((item) => ({
+      ...item,
+      order_id: orderId,
+    }))
 
-        // Actualizar stock para cada item del pedido
-        order.items.forEach((item) => {
-          const product = products.find((p) => p.id === item.id && p.category === item.category)
-          if (product) {
-            // Calcular nuevo stock
-            const newStock = Math.max(0, product.stock - item.quantity)
+    const { error: itemsError } = await supabase.from("order_items").insert(orderItemsWithOrderId)
 
-            // Actualizar stock
-            product.stock = newStock
-          }
-        })
+    if (itemsError) {
+      console.error("Error creating order items:", itemsError)
+      // Intentar eliminar el pedido y la info de envío para revertir
+      await supabase.from("shipping_info").delete().eq("order_id", orderId)
+      await supabase.from("orders").delete().eq("id", orderId)
+      return null
+    }
 
-        // Guardar productos actualizados
-        localStorage.setItem("products", JSON.stringify(products))
+    // 4. Actualizar el stock de los productos
+    for (const item of orderItems) {
+      if (item.product_id) {
+        // Obtener el stock actual
+        const { data: productData } = await supabase.from("products").select("stock").eq("id", item.product_id).single()
+
+        if (productData) {
+          const currentStock = productData.stock
+          const newStock = Math.max(0, currentStock - item.quantity)
+
+          // Actualizar el stock
+          await updateProductStock(item.product_id, newStock)
+        }
       }
-    } catch (error) {
-      console.error("Error al actualizar stock:", error)
     }
 
-    // Enviar notificación a Telegram
-    try {
-      await fetch("/api/telegram-notification", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          orderNumber: order.id,
-          customerName: order.shipping.name,
-          email: order.shipping.email,
-          total: order.total,
-          paymentMethod: order.paymentMethod,
-          shippingMethod: order.shippingMethod,
-        }),
-      })
-    } catch (error) {
-      console.error("Error al enviar notificación a Telegram:", error)
-      // No lanzamos el error para que no interrumpa el flujo principal
-    }
+    return orderId
   } catch (error) {
-    console.error("Error al guardar el pedido:", error)
+    console.error("Error in saveOrder:", error)
+    return null
   }
 }
 
 // Función para obtener todos los pedidos
-export const getOrders = (): Order[] => {
-  if (typeof window === "undefined") return []
+export const getOrders = async (): Promise<Order[]> => {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase.from("orders").select("*").order("created_at", { ascending: false })
 
-  try {
-    const ordersJson = localStorage.getItem("orders")
-    if (!ordersJson) return []
-
-    const orders = JSON.parse(ordersJson)
-
-    // Asegurarse de que todos los pedidos tengan el campo viewed
-    return orders.map((order: any) => ({
-      ...order,
-      viewed: order.viewed !== undefined ? order.viewed : true, // Si no existe, asumir que ya fue visto
-    }))
-  } catch (error) {
-    console.error("Error parsing orders:", error)
+  if (error) {
+    console.error("Error fetching orders:", error)
     return []
   }
+
+  return data || []
 }
 
-// Función para obtener un pedido por ID
-export const getOrderById = (id: string): Order | null => {
-  const orders = getOrders()
-  return orders.find((order) => order.id === id) || null
+// Función para obtener un pedido por ID con toda su información relacionada
+export const getOrderById = async (
+  id: string,
+): Promise<{
+  order: Order | null
+  shippingInfo: ShippingInfo | null
+  orderItems: OrderItem[]
+}> => {
+  const supabase = getSupabaseClient()
+
+  try {
+    // Obtener el pedido
+    const { data: orderData, error: orderError } = await supabase.from("orders").select("*").eq("id", id).single()
+
+    if (orderError) {
+      console.error("Error fetching order:", orderError)
+      return { order: null, shippingInfo: null, orderItems: [] }
+    }
+
+    // Obtener la información de envío
+    const { data: shippingData, error: shippingError } = await supabase
+      .from("shipping_info")
+      .select("*")
+      .eq("order_id", id)
+      .single()
+
+    if (shippingError && shippingError.code !== "PGRST116") {
+      // No error if not found
+      console.error("Error fetching shipping info:", shippingError)
+    }
+
+    // Obtener los items del pedido
+    const { data: itemsData, error: itemsError } = await supabase.from("order_items").select("*").eq("order_id", id)
+
+    if (itemsError) {
+      console.error("Error fetching order items:", itemsError)
+    }
+
+    return {
+      order: orderData,
+      shippingInfo: shippingData,
+      orderItems: itemsData || [],
+    }
+  } catch (error) {
+    console.error("Error in getOrderById:", error)
+    return { order: null, shippingInfo: null, orderItems: [] }
+  }
 }
 
 // Función para actualizar el estado de un pedido
-export const updateOrderStatus = (id: string, status: Order["status"]): void => {
-  const orders = getOrders()
-  const orderIndex = orders.findIndex((order) => order.id === id)
+export const updateOrderStatus = async (id: string, status: Order["status"]): Promise<boolean> => {
+  const supabase = getSupabaseClient()
+  const { error } = await supabase
+    .from("orders")
+    .update({
+      status,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
 
-  if (orderIndex !== -1) {
-    orders[orderIndex].status = status
-    localStorage.setItem("orders", JSON.stringify(orders))
+  if (error) {
+    console.error("Error updating order status:", error)
+    return false
   }
+
+  return true
 }
 
 // Función para actualizar el estado de WhatsApp de un pedido
-export const updateOrderWhatsappStatus = (id: string, sent: boolean): void => {
-  const orders = getOrders()
-  const orderIndex = orders.findIndex((order) => order.id === id)
+export const updateOrderWhatsappStatus = async (id: string, sent: boolean): Promise<boolean> => {
+  const supabase = getSupabaseClient()
+  const { error } = await supabase
+    .from("orders")
+    .update({
+      whatsapp_sent: sent,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
 
-  if (orderIndex !== -1) {
-    orders[orderIndex].whatsappSent = sent
-    localStorage.setItem("orders", JSON.stringify(orders))
+  if (error) {
+    console.error("Error updating order whatsapp status:", error)
+    return false
   }
+
+  return true
 }
 
 // Función para agregar notas a un pedido
-export const addOrderNotes = (id: string, notes: string): void => {
-  const orders = getOrders()
-  const orderIndex = orders.findIndex((order) => order.id === id)
+export const addOrderNotes = async (id: string, notes: string): Promise<boolean> => {
+  const supabase = getSupabaseClient()
+  const { error } = await supabase
+    .from("orders")
+    .update({
+      notes,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
 
-  if (orderIndex !== -1) {
-    orders[orderIndex].notes = notes
-    localStorage.setItem("orders", JSON.stringify(orders))
+  if (error) {
+    console.error("Error adding order notes:", error)
+    return false
   }
+
+  return true
 }
 
 // Función para eliminar un pedido
-export const deleteOrder = (id: string): void => {
-  const orders = getOrders()
-  const filteredOrders = orders.filter((order) => order.id !== id)
-  localStorage.setItem("orders", JSON.stringify(filteredOrders))
-}
+export const deleteOrder = async (id: string): Promise<boolean> => {
+  const supabase = getSupabaseClient()
+  // Eliminar el pedido (las tablas relacionadas se eliminarán por la restricción ON DELETE CASCADE)
+  const { error } = await supabase.from("orders").delete().eq("id", id)
 
-// Función para exportar pedidos a CSV
-export const exportOrdersToCSV = (): string => {
-  const orders = getOrders()
-
-  if (orders.length === 0) {
-    return ""
+  if (error) {
+    console.error("Error deleting order:", error)
+    return false
   }
 
-  // Cabeceras
-  const headers = [
-    "ID",
-    "Fecha",
-    "Cliente",
-    "Email",
-    "Teléfono",
-    "Método de envío",
-    "Dirección",
-    "Método de pago",
-    "Total",
-    "Estado",
-    "WhatsApp enviado",
-    "Notas",
-  ].join(",")
-
-  // Filas
-  const rows = orders.map((order) => {
-    const date = new Date(order.date).toLocaleDateString()
-    const address =
-      order.shippingMethod === "delivery"
-        ? `${order.shipping.address}, ${order.shipping.city}, ${order.shipping.postalCode}, ${order.shipping.province}`
-        : "Retiro en tienda"
-
-    return [
-      order.id,
-      date,
-      order.shipping.name,
-      order.shipping.email,
-      order.shipping.phone,
-      order.shippingMethod === "delivery" ? "Envío a domicilio" : "Retiro en tienda",
-      address,
-      order.paymentMethod === "transferencia" ? "Transferencia bancaria" : "Efectivo",
-      order.total,
-      order.status,
-      order.whatsappSent ? "Sí" : "No",
-      order.notes || "",
-    ].join(",")
-  })
-
-  return [headers, ...rows].join("\n")
+  return true
 }
 
-// Funciones para manejar notificaciones de nuevos pedidos
+// Función para marcar un pedido como visto
+export const markOrderAsViewed = async (id: string): Promise<boolean> => {
+  const supabase = getSupabaseClient()
+  const { error } = await supabase
+    .from("orders")
+    .update({
+      viewed: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
 
-// Actualizar contador de pedidos nuevos
-export const updateNewOrdersCount = (increment = 0): void => {
-  if (typeof window === "undefined") return
-
-  try {
-    // Obtener el contador actual
-    const currentCount = getNewOrdersCount()
-
-    // Actualizar el contador
-    const newCount = increment > 0 ? currentCount + increment : 0
-
-    // Guardar en localStorage
-    localStorage.setItem("newOrdersCount", newCount.toString())
-  } catch (error) {
-    console.error("Error al actualizar el contador de pedidos nuevos:", error)
+  if (error) {
+    console.error("Error marking order as viewed:", error)
+    return false
   }
+
+  return true
 }
 
-// Obtener contador de pedidos nuevos
-export const getNewOrdersCount = (): number => {
-  if (typeof window === "undefined") return 0
+// Función para marcar todos los pedidos como vistos
+export const markAllOrdersAsViewed = async (): Promise<boolean> => {
+  const supabase = getSupabaseClient()
+  const { error } = await supabase
+    .from("orders")
+    .update({
+      viewed: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("viewed", false)
 
-  try {
-    const count = localStorage.getItem("newOrdersCount")
-    return count ? Number.parseInt(count, 10) : 0
-  } catch (error) {
-    console.error("Error al obtener el contador de pedidos nuevos:", error)
+  if (error) {
+    console.error("Error marking all orders as viewed:", error)
+    return false
+  }
+
+  return true
+}
+
+// Función para obtener el número de pedidos no vistos
+export const getUnviewedOrdersCount = async (): Promise<number> => {
+  const supabase = getSupabaseClient()
+  const { data, error, count } = await supabase.from("orders").select("id", { count: "exact" }).eq("viewed", false)
+
+  if (error) {
+    console.error("Error counting unviewed orders:", error)
     return 0
   }
-}
 
-// Marcar un pedido como visto
-export const markOrderAsViewed = (id: string): void => {
-  try {
-    const orders = getOrders()
-    const orderIndex = orders.findIndex((order) => order.id === id)
-
-    if (orderIndex !== -1 && !orders[orderIndex].viewed) {
-      orders[orderIndex].viewed = true
-      localStorage.setItem("orders", JSON.stringify(orders))
-
-      // Decrementar el contador de pedidos nuevos
-      const currentCount = getNewOrdersCount()
-      if (currentCount > 0) {
-        updateNewOrdersCount(currentCount - 1)
-      }
-    }
-  } catch (error) {
-    console.error("Error al marcar el pedido como visto:", error)
-  }
-}
-
-// Marcar todos los pedidos como vistos
-export const markAllOrdersAsViewed = (): void => {
-  try {
-    const orders = getOrders()
-
-    // Marcar todos como vistos
-    const updatedOrders = orders.map((order) => ({
-      ...order,
-      viewed: true,
-    }))
-
-    localStorage.setItem("orders", JSON.stringify(updatedOrders))
-
-    // Resetear contador
-    updateNewOrdersCount(0)
-  } catch (error) {
-    console.error("Error al marcar todos los pedidos como vistos:", error)
-  }
-}
-
-// Obtener pedidos no vistos
-export const getUnviewedOrders = (): Order[] => {
-  try {
-    const orders = getOrders()
-    return orders.filter((order) => !order.viewed)
-  } catch (error) {
-    console.error("Error al obtener los pedidos no vistos:", error)
-    return []
-  }
+  return count || 0
 }

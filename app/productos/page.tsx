@@ -1,114 +1,57 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import Image from "next/image"
-import { ArrowLeft, Check, ChevronsUpDown } from "lucide-react"
-
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardFooter } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { getProducts, getProductsByCategory } from "@/lib/actions"
+import type { Product } from "@/lib/supabase"
 
-export default function ProductsPage() {
-  const [categoryFilter, setCategoryFilter] = useState<string>("all")
-  const [sortOrder, setSortOrder] = useState<string>("featured")
+export default function ProductosPage() {
+  const [allProducts, setAllProducts] = useState<Product[]>([])
+  const [sweaters, setSweaters] = useState<Product[]>([])
+  const [tapados, setTapados] = useState<Product[]>([])
+  const [loading, setLoading] = useState(true)
 
-  // Datos de ejemplo - en una implementación real, estos vendrían de una base de datos
-  const allProducts = [
-    {
-      id: 1,
-      name: "Sweater Milán",
-      description: "Sweater con felpudo en cuello",
-      price: 45000,
-      discount: 0,
-      image: "/products/sweater-blanco.png",
-      category: "sweaters",
-      color: "Blanco",
-      isBestseller: true,
-    },
-    {
-      id: 2,
-      name: "Sweater París",
-      description: "Sweater con felpudo en cuello",
-      price: 42000,
-      discount: 0,
-      image: "/products/sweater-beige.png",
-      category: "sweaters",
-      color: "Beige",
-    },
-    {
-      id: 3,
-      name: "Sweater Berlín",
-      description: "Sweater con felpudo en cuello",
-      price: 48000,
-      discount: 10,
-      image: "/products/sweater-gris.png",
-      category: "sweaters",
-      color: "Gris",
-    },
-    {
-      id: 1,
-      name: "Tapado Londres",
-      description: "Tapado con felpudo en muñecas",
-      price: 65000,
-      discount: 15,
-      image: "/products/tapado-beige.png",
-      category: "tapados",
-      color: "Beige",
-    },
-    {
-      id: 2,
-      name: "Tapado Viena",
-      description: "Tapado con felpudo en muñecas",
-      price: 68000,
-      discount: 0,
-      image: "/products/tapado-blanco.png",
-      category: "tapados",
-      color: "Blanco",
-    },
-    {
-      id: 3,
-      name: "Tapado Praga",
-      description: "Tapado con felpudo en cuello",
-      price: 72000,
-      discount: 0,
-      image: "/products/tapado-marron.png",
-      category: "tapados",
-      color: "Marrón",
-    },
-  ]
+  useEffect(() => {
+    const fetchProducts = async () => {
+      setLoading(true)
+      try {
+        const [allData, sweatersData, tapadosData] = await Promise.all([
+          getProducts(),
+          getProductsByCategory("sweaters"),
+          getProductsByCategory("tapados"),
+        ])
 
-  // Filtrar productos por categoría
-  const filteredProducts =
-    categoryFilter === "all" ? allProducts : allProducts.filter((product) => product.category === categoryFilter)
-
-  // Ordenar productos
-  const sortedProducts = [...filteredProducts].sort((a, b) => {
-    const priceA = a.discount > 0 ? a.price * (1 - a.discount / 100) : a.price
-    const priceB = b.discount > 0 ? b.price * (1 - b.discount / 100) : b.price
-
-    switch (sortOrder) {
-      case "price-asc":
-        return priceA - priceB
-      case "price-desc":
-        return priceB - priceA
-      case "discount":
-        return b.discount - a.discount
-      default: // featured - bestsellers first
-        if (a.isBestseller && !b.isBestseller) return -1
-        if (!a.isBestseller && b.isBestseller) return 1
-        return 0
+        setAllProducts(allData)
+        setSweaters(sweatersData)
+        setTapados(tapadosData)
+      } catch (error) {
+        console.error("Error fetching products:", error)
+      } finally {
+        setLoading(false)
+      }
     }
-  })
+
+    fetchProducts()
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex flex-col min-h-screen">
+        <SiteHeader />
+        <main className="flex-1 flex items-center justify-center">
+          <div className="animate-spin h-8 w-8 border-4 border-gray-200 rounded-full border-t-black"></div>
+        </main>
+        <SiteFooter />
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -120,195 +63,179 @@ export default function ProductsPage() {
               Inicio
             </Link>
             <span className="text-sm text-muted-foreground">/</span>
-            <span className="text-sm">Todos los Productos</span>
+            <span className="text-sm">Productos</span>
           </div>
-
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-            <div>
-              <h1 className="text-3xl font-bold mb-2">Todos los Productos</h1>
-              <p className="text-muted-foreground">
-                Descubre nuestra colección completa de prendas con detalles de felpudo, inspiradas en el estilo europeo.
-              </p>
-            </div>
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Volver al inicio
-              </Link>
-            </Button>
-          </div>
-
-          <div className="flex flex-col lg:flex-row gap-8">
-            {/* Filtros para pantallas grandes */}
-            <div className="hidden lg:block w-64 space-y-6">
-              <div>
-                <h3 className="font-medium mb-3">Categorías</h3>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      className={`justify-start px-2 ${categoryFilter === "all" ? "font-medium" : "font-normal text-muted-foreground"}`}
-                      onClick={() => setCategoryFilter("all")}
-                    >
-                      {categoryFilter === "all" && <Check className="h-4 w-4 mr-2" />}
-                      Todos los productos
-                    </Button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      className={`justify-start px-2 ${categoryFilter === "sweaters" ? "font-medium" : "font-normal text-muted-foreground"}`}
-                      onClick={() => setCategoryFilter("sweaters")}
-                    >
-                      {categoryFilter === "sweaters" && <Check className="h-4 w-4 mr-2" />}
-                      Sweaters
-                    </Button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      className={`justify-start px-2 ${categoryFilter === "tapados" ? "font-medium" : "font-normal text-muted-foreground"}`}
-                      onClick={() => setCategoryFilter("tapados")}
-                    >
-                      {categoryFilter === "tapados" && <Check className="h-4 w-4 mr-2" />}
-                      Tapados
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Contenido principal */}
-            <div className="flex-1">
-              {/* Filtros móviles y ordenamiento */}
-              <div className="flex flex-col sm:flex-row justify-between gap-4 mb-6">
-                <Accordion type="single" collapsible className="w-full lg:hidden">
-                  <AccordionItem value="filters">
-                    <AccordionTrigger>Filtros</AccordionTrigger>
-                    <AccordionContent>
-                      <div className="space-y-4">
-                        <div>
-                          <h3 className="font-medium mb-2">Categorías</h3>
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="ghost"
-                                className={`justify-start px-2 ${categoryFilter === "all" ? "font-medium" : "font-normal text-muted-foreground"}`}
-                                onClick={() => setCategoryFilter("all")}
-                              >
-                                {categoryFilter === "all" && <Check className="h-4 w-4 mr-2" />}
-                                Todos los productos
-                              </Button>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="ghost"
-                                className={`justify-start px-2 ${categoryFilter === "sweaters" ? "font-medium" : "font-normal text-muted-foreground"}`}
-                                onClick={() => setCategoryFilter("sweaters")}
-                              >
-                                {categoryFilter === "sweaters" && <Check className="h-4 w-4 mr-2" />}
-                                Sweaters
-                              </Button>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="ghost"
-                                className={`justify-start px-2 ${categoryFilter === "tapados" ? "font-medium" : "font-normal text-muted-foreground"}`}
-                                onClick={() => setCategoryFilter("tapados")}
-                              >
-                                {categoryFilter === "tapados" && <Check className="h-4 w-4 mr-2" />}
-                                Tapados
-                              </Button>
-                            </div>
+          <div className="space-y-6">
+            <h1 className="text-3xl font-bold">Productos</h1>
+            <p className="text-muted-foreground">
+              Descubre nuestra colección de prendas con felpudo, confeccionadas con materiales premium. Diseños
+              exclusivos inspirados en el estilo europeo.
+            </p>
+            <Tabs defaultValue="all">
+              <TabsList className="mb-6">
+                <TabsTrigger value="all">Todos</TabsTrigger>
+                <TabsTrigger value="sweaters">Sweaters</TabsTrigger>
+                <TabsTrigger value="tapados">Tapados</TabsTrigger>
+              </TabsList>
+              <TabsContent value="all">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {allProducts.map((product) => (
+                    <Card key={product.id} className="overflow-hidden">
+                      <div className="relative">
+                        {product.is_bestseller && (
+                          <div className="absolute top-2 right-2 z-10">
+                            <Badge className="bg-black text-white">Bestseller</Badge>
                           </div>
-                        </div>
+                        )}
+                        {product.discount > 0 && (
+                          <div className="absolute top-2 right-2 z-10">
+                            <Badge className="bg-red-600 text-white">-{product.discount}%</Badge>
+                          </div>
+                        )}
+                        <Link href={`/productos/${product.category}/${product.id}`}>
+                          <Image
+                            src={
+                              product.image ||
+                              (product.category === "sweaters"
+                                ? "/products/sweater-blanco.png"
+                                : "/products/tapado-beige.png")
+                            }
+                            alt={product.name}
+                            width={500}
+                            height={600}
+                            className="object-cover w-full aspect-[4/5]"
+                          />
+                        </Link>
                       </div>
-                    </AccordionContent>
-                  </AccordionItem>
-                </Accordion>
-
-                <div className="flex justify-end">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" className="w-[200px] justify-between">
-                        {sortOrder === "featured" && "Destacados"}
-                        {sortOrder === "price-asc" && "Precio: menor a mayor"}
-                        {sortOrder === "price-desc" && "Precio: mayor a menor"}
-                        {sortOrder === "discount" && "Mayores descuentos"}
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-[200px]">
-                      <DropdownMenuRadioGroup value={sortOrder} onValueChange={setSortOrder}>
-                        <DropdownMenuRadioItem value="featured">Destacados</DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="price-asc">Precio: menor a mayor</DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="price-desc">Precio: mayor a menor</DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="discount">Mayores descuentos</DropdownMenuRadioItem>
-                      </DropdownMenuRadioGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-
-              {/* Productos */}
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {sortedProducts.map((product, index) => (
-                  <div
-                    key={`${product.category}-${product.id}-${index}`}
-                    className="group relative overflow-hidden rounded-lg border"
-                  >
-                    <Link href={`/productos/${product.category}/${product.id}`} className="absolute inset-0 z-10">
-                      <span className="sr-only">Ver producto</span>
-                    </Link>
-                    <div className="relative aspect-square overflow-hidden">
-                      <Image
-                        src={product.image || "/placeholder.svg"}
-                        alt={product.name}
-                        width={400}
-                        height={400}
-                        className="object-cover transition-transform group-hover:scale-105 h-full w-full"
-                      />
-                      {product.isBestseller && (
-                        <div className="absolute top-4 right-4">
-                          <Badge className="bg-black text-white">Bestseller</Badge>
-                        </div>
-                      )}
-                      {product.discount > 0 && (
-                        <div className="absolute top-4 right-4">
-                          <Badge className="bg-red-600 text-white">-{product.discount}%</Badge>
-                        </div>
-                      )}
-                    </div>
-                    <div className="p-4 bg-white">
-                      <h3 className="font-semibold text-lg">{product.name}</h3>
-                      <p className="text-sm text-muted-foreground">{product.description}</p>
-                      <div className="flex items-center justify-between mt-2">
+                      <CardContent className="p-4">
+                        <Link href={`/productos/${product.category}/${product.id}`}>
+                          <h2 className="font-semibold text-lg mb-2">{product.name}</h2>
+                        </Link>
                         {product.discount > 0 ? (
-                          <div className="font-semibold">
-                            <span className="line-through text-muted-foreground mr-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold">
+                              ${((product.price * (100 - product.discount)) / 100).toLocaleString()}
+                            </span>
+                            <span className="text-sm text-muted-foreground line-through">
                               ${product.price.toLocaleString()}
                             </span>
-                            ${((product.price * (100 - product.discount)) / 100).toLocaleString()}
                           </div>
                         ) : (
-                          <div className="font-semibold">${product.price.toLocaleString()}</div>
+                          <span className="font-bold">${product.price.toLocaleString()}</span>
                         )}
-                        <div className="text-sm text-muted-foreground">{product.color}</div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Mensaje si no hay productos */}
-              {sortedProducts.length === 0 && (
-                <div className="text-center py-12">
-                  <p className="text-muted-foreground">
-                    No se encontraron productos que coincidan con los filtros seleccionados.
-                  </p>
+                      </CardContent>
+                      <CardFooter className="p-4 pt-0">
+                        <Button asChild className="w-full bg-black hover:bg-gray-800 text-white">
+                          <Link href={`/productos/${product.category}/${product.id}`}>Ver detalles</Link>
+                        </Button>
+                      </CardFooter>
+                    </Card>
+                  ))}
                 </div>
-              )}
-            </div>
+              </TabsContent>
+              <TabsContent value="sweaters">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {sweaters.map((product) => (
+                    <Card key={product.id} className="overflow-hidden">
+                      <div className="relative">
+                        {product.is_bestseller && (
+                          <div className="absolute top-2 right-2 z-10">
+                            <Badge className="bg-black text-white">Bestseller</Badge>
+                          </div>
+                        )}
+                        {product.discount > 0 && (
+                          <div className="absolute top-2 right-2 z-10">
+                            <Badge className="bg-red-600 text-white">-{product.discount}%</Badge>
+                          </div>
+                        )}
+                        <Link href={`/productos/sweaters/${product.id}`}>
+                          <Image
+                            src={product.image || "/products/sweater-blanco.png"}
+                            alt={product.name}
+                            width={500}
+                            height={600}
+                            className="object-cover w-full aspect-[4/5]"
+                          />
+                        </Link>
+                      </div>
+                      <CardContent className="p-4">
+                        <Link href={`/productos/sweaters/${product.id}`}>
+                          <h2 className="font-semibold text-lg mb-2">{product.name}</h2>
+                        </Link>
+                        {product.discount > 0 ? (
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold">
+                              ${((product.price * (100 - product.discount)) / 100).toLocaleString()}
+                            </span>
+                            <span className="text-sm text-muted-foreground line-through">
+                              ${product.price.toLocaleString()}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="font-bold">${product.price.toLocaleString()}</span>
+                        )}
+                      </CardContent>
+                      <CardFooter className="p-4 pt-0">
+                        <Button asChild className="w-full bg-black hover:bg-gray-800 text-white">
+                          <Link href={`/productos/sweaters/${product.id}`}>Ver detalles</Link>
+                        </Button>
+                      </CardFooter>
+                    </Card>
+                  ))}
+                </div>
+              </TabsContent>
+              <TabsContent value="tapados">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {tapados.map((product) => (
+                    <Card key={product.id} className="overflow-hidden">
+                      <div className="relative">
+                        {product.is_bestseller && (
+                          <div className="absolute top-2 right-2 z-10">
+                            <Badge className="bg-black text-white">Bestseller</Badge>
+                          </div>
+                        )}
+                        {product.discount > 0 && (
+                          <div className="absolute top-2 right-2 z-10">
+                            <Badge className="bg-red-600 text-white">-{product.discount}%</Badge>
+                          </div>
+                        )}
+                        <Link href={`/productos/tapados/${product.id}`}>
+                          <Image
+                            src={product.image || "/products/tapado-beige.png"}
+                            alt={product.name}
+                            width={500}
+                            height={600}
+                            className="object-cover w-full aspect-[4/5]"
+                          />
+                        </Link>
+                      </div>
+                      <CardContent className="p-4">
+                        <Link href={`/productos/tapados/${product.id}`}>
+                          <h2 className="font-semibold text-lg mb-2">{product.name}</h2>
+                        </Link>
+                        {product.discount > 0 ? (
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold">
+                              ${((product.price * (100 - product.discount)) / 100).toLocaleString()}
+                            </span>
+                            <span className="text-sm text-muted-foreground line-through">
+                              ${product.price.toLocaleString()}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="font-bold">${product.price.toLocaleString()}</span>
+                        )}
+                      </CardContent>
+                      <CardFooter className="p-4 pt-0">
+                        <Button asChild className="w-full bg-black hover:bg-gray-800 text-white">
+                          <Link href={`/productos/tapados/${product.id}`}>Ver detalles</Link>
+                        </Button>
+                      </CardFooter>
+                    </Card>
+                  ))}
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
         </div>
       </main>

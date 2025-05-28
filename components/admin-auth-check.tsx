@@ -4,48 +4,56 @@ import type React from "react"
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Loader2 } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 export default function AdminAuthCheck({ children }: { children: React.ReactNode }) {
   const router = useRouter()
+  const { toast } = useToast()
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    // Verificar autenticación
-    const checkAuth = () => {
-      const authenticated = localStorage.getItem("adminAuthenticated") === "true"
-      const authTime = Number.parseInt(localStorage.getItem("adminAuthTime") || "0")
+    // Verificar si el admin está autenticado
+    const adminAuthenticated = localStorage.getItem("adminAuthenticated")
+    const adminAuthTime = localStorage.getItem("adminAuthTime")
 
-      // Sesión expira después de 24 horas
-      const sessionValid = authenticated && Date.now() - authTime < 24 * 60 * 60 * 1000
-
-      if (!sessionValid) {
-        // Limpiar datos de autenticación expirados
-        localStorage.removeItem("adminAuthenticated")
-        localStorage.removeItem("adminAuthTime")
-        router.push("/admin/login")
-      } else {
-        setIsAuthenticated(true)
-      }
-
-      setIsLoading(false)
+    if (!adminAuthenticated || adminAuthenticated !== "true") {
+      // No autenticado, redirigir al login
+      router.push("/admin/login")
+      return
     }
 
-    checkAuth()
-  }, [router])
+    // Verificar si la sesión ha expirado (24 horas)
+    if (adminAuthTime) {
+      const authTime = Number.parseInt(adminAuthTime, 10)
+      const now = Date.now()
+      const hoursSinceAuth = (now - authTime) / (1000 * 60 * 60)
+
+      if (hoursSinceAuth > 24) {
+        // Sesión expirada, redirigir al login
+        localStorage.removeItem("adminAuthenticated")
+        localStorage.removeItem("adminAuthTime")
+        toast({
+          title: "Sesión expirada",
+          description: "Tu sesión ha expirado. Por favor, inicia sesión nuevamente.",
+        })
+        router.push("/admin/login")
+        return
+      }
+    }
+
+    // Autenticado y sesión válida
+    setIsAuthenticated(true)
+    setIsLoading(false)
+  }, [router, toast])
 
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+        <div className="animate-spin h-8 w-8 border-4 border-gray-200 rounded-full border-t-black"></div>
       </div>
     )
   }
 
-  if (!isAuthenticated) {
-    return null // No renderizar nada mientras se redirige
-  }
-
-  return <>{children}</>
+  return isAuthenticated ? <>{children}</> : null
 }

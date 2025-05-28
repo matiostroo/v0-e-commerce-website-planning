@@ -1,117 +1,152 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
+import type React from "react"
 
+import { createContext, useContext, useState } from "react"
+import { useToast } from "@/hooks/use-toast"
+import { checkProductStock } from "@/lib/actions"
+
+// Definir el tipo para un item del carrito
 export type CartItem = {
   id: number
   name: string
   price: number
   originalPrice?: number
-  color: string
-  size: string
   quantity: number
   image: string
+  color: string
+  size: string
   category: string
 }
 
+// Definir el tipo para el contexto del carrito
 type CartContextType = {
   items: CartItem[]
-  addItem: (item: CartItem) => void
+  addItem: (item: CartItem) => Promise<boolean>
+  updateItemQuantity: (id: number, color: string, size: string, quantity: number) => Promise<boolean>
   removeItem: (id: number, color: string, size: string) => void
-  updateQuantity: (id: number, color: string, size: string, quantity: number) => void
   clearCart: () => void
   itemCount: number
+  subtotal: number
+  isCartOpen: boolean
+  setIsCartOpen: (isOpen: boolean) => void
   lastAddedItem: CartItem | null
-  showNotification: boolean
-  closeNotification: () => void
 }
 
-const CartContext = createContext<CartContextType | undefined>(undefined)
+// Crear el contexto
+export const CartContext = createContext<CartContextType | undefined>(undefined)
 
-export function CartProvider({ children }: { children: ReactNode }) {
+// Proveedor del contexto
+export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([])
-  const [itemCount, setItemCount] = useState(0)
+  const [isCartOpen, setIsCartOpen] = useState(false)
   const [lastAddedItem, setLastAddedItem] = useState<CartItem | null>(null)
-  const [showNotification, setShowNotification] = useState(false)
+  const { toast } = useToast()
 
-  // Cargar carrito desde localStorage cuando el componente se monta (solo en el cliente)
-  useEffect(() => {
-    const storedCart = localStorage.getItem("cart")
-    if (storedCart) {
-      try {
-        const parsedCart = JSON.parse(storedCart)
-        setItems(parsedCart)
+  // Calcular el número total de items en el carrito
+  const itemCount = items.reduce((total, item) => total + item.quantity, 0)
 
-        // Calcular el número total de items
-        const count = parsedCart.reduce((total: number, item: CartItem) => total + item.quantity, 0)
-        setItemCount(count)
-      } catch (error) {
-        console.error("Error parsing cart from localStorage:", error)
+  // Calcular el subtotal del carrito
+  const subtotal = items.reduce((total, item) => total + item.price * item.quantity, 0)
+
+  // Agregar un item al carrito
+  const addItem = async (newItem: CartItem): Promise<boolean> => {
+    try {
+      // Verificar stock antes de agregar
+      const hasStock = await checkProductStock(newItem.id, newItem.quantity)
+
+      if (!hasStock) {
+        toast({
+          title: "Sin stock suficiente",
+          description: "Lo sentimos, no hay suficiente stock disponible para este producto.",
+          variant: "destructive",
+        })
+        return false
       }
-    }
-  }, [])
 
-  // Guardar carrito en localStorage cuando cambia
-  useEffect(() => {
-    if (items.length > 0) {
-      localStorage.setItem("cart", JSON.stringify(items))
-
-      // Actualizar el contador de items
-      const count = items.reduce((total, item) => total + item.quantity, 0)
-      setItemCount(count)
-    } else {
-      localStorage.removeItem("cart")
-      setItemCount(0)
-    }
-  }, [items])
-
-  const addItem = (newItem: CartItem) => {
-    setItems((prevItems) => {
-      // Verificar si el producto ya existe en el carrito (mismo id, color y talle)
-      const existingItemIndex = prevItems.findIndex(
+      // Buscar si el item ya existe en el carrito (mismo id, color y talle)
+      const existingItemIndex = items.findIndex(
         (item) => item.id === newItem.id && item.color === newItem.color && item.size === newItem.size,
       )
 
-      let updatedItems
-
       if (existingItemIndex >= 0) {
         // Si existe, actualizar la cantidad
-        updatedItems = [...prevItems]
-        updatedItems[existingItemIndex].quantity += newItem.quantity
+        const updatedItems = [...items]
+        const newQuantity = updatedItems[existingItemIndex].quantity + newItem.quantity
+
+        // Verificar stock para la cantidad actualizada
+        const hasEnoughStock = await checkProductStock(newItem.id, newQuantity)
+
+        if (!hasEnoughStock) {
+          toast({
+            title: "Sin stock suficiente",
+            description: "Lo sentimos, no hay suficiente stock disponible para la cantidad solicitada.",
+            variant: "destructive",
+          })
+          return false
+        }
+
+        updatedItems[existingItemIndex].quantity = newQuantity
+        setItems(updatedItems)
       } else {
-        // Si no existe, agregar el nuevo item
-        updatedItems = [...prevItems, newItem]
+        // Si no existe, agregar como nuevo item
+        setItems((prevItems) => [...prevItems, newItem])
       }
 
-      // Guardar el último item agregado para la notificación
+      // Guardar el último item agregado para mostrar notificación
       setLastAddedItem(newItem)
-      setShowNotification(true)
-
-      return updatedItems
-    })
+      return true
+    } catch (error) {
+      console.error("Error al agregar item al carrito:", error)
+      toast({
+        title: "Error",
+        description: "No se pudo agregar el producto al carrito.",
+        variant: "destructive",
+      })
+      return false
+    }
   }
 
+  // Actualizar la cantidad de un item
+  const updateItemQuantity = async (id: number, color: string, size: string, quantity: number): Promise<boolean> => {
+    try {
+      if (quantity <= 0) {
+        removeItem(id, color, size)
+        return true
+      }
+
+      // Verificar stock antes de actualizar
+      const hasStock = await checkProductStock(id, quantity)
+
+      if (!hasStock) {
+        toast({
+          title: "Sin stock suficiente",
+          description: "Lo sentimos, no hay suficiente stock disponible para la cantidad solicitada.",
+          variant: "destructive",
+        })
+        return false
+      }
+
+      setItems((prevItems) =>
+        prevItems.map((item) =>
+          item.id === id && item.color === color && item.size === size ? { ...item, quantity } : item,
+        ),
+      )
+      return true
+    } catch (error) {
+      console.error("Error al actualizar cantidad:", error)
+      return false
+    }
+  }
+
+  // Eliminar un item del carrito
   const removeItem = (id: number, color: string, size: string) => {
     setItems((prevItems) => prevItems.filter((item) => !(item.id === id && item.color === color && item.size === size)))
   }
 
-  const updateQuantity = (id: number, color: string, size: string, quantity: number) => {
-    if (quantity < 1) return
-
-    setItems((prevItems) =>
-      prevItems.map((item) =>
-        item.id === id && item.color === color && item.size === size ? { ...item, quantity } : item,
-      ),
-    )
-  }
-
+  // Limpiar el carrito
   const clearCart = () => {
     setItems([])
-    localStorage.removeItem("cart")
-  }
-
-  const closeNotification = () => {
-    setShowNotification(false)
   }
 
   return (
@@ -119,13 +154,14 @@ export function CartProvider({ children }: { children: ReactNode }) {
       value={{
         items,
         addItem,
+        updateItemQuantity,
         removeItem,
-        updateQuantity,
         clearCart,
         itemCount,
+        subtotal,
+        isCartOpen,
+        setIsCartOpen,
         lastAddedItem,
-        showNotification,
-        closeNotification,
       }}
     >
       {children}
@@ -133,6 +169,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// Hook para usar el contexto del carrito
 export function useCart() {
   const context = useContext(CartContext)
   if (context === undefined) {
